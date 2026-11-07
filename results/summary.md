@@ -8,6 +8,7 @@
 | C1: fixed steps [lance] | `gemma-4-E2B-it` | 60 | **53.3%** | 0.54 | 62% | 3.53 | 1.78 | 2715 | 195 | 14.7 | 1.1 | 1.433 |
 | C1 v2: steps + grounded answers [lance] | `gemma-4-E2B-it` | 60 | **55.0%** | 0.58 | 73% | 4.45 | 2.33 | 3991 | 313 | 22.9 | 1.5 | 2.226 |
 | C1 v3: v2 + answer-shape check [lance] | `gemma-4-E2B-it` | 60 | **63.3%** | 0.66 | 73% | 4.55 | 2.33 | 4007 | 317 | 26.2 | 1.6 | 2.547 |
+| C1 v4: v3 + backtrack, anchors, facts-first [lance] | `gemma-4-E2B-it` | 60 | **65.0%** | 0.67 | 67% | 4.5 | 2.22 | 4033 | 346 | 24.4 | 1.4 | 2.374 |
 | C2: guardrailed agent | `gemma-4-E2B-it` | 60 | **43.3%** | 0.46 | 58% | 3.57 | 1.68 | 2690 | 305 | 22.3 | 0.3 | 2.172 |
 | C2 v1 (guardrails logged, not enforced) | `gemma-4-E2B-it` | 30 | **40.0%** | 0.43 | 43% | 2.27 | 1.1 | 1369 | 183 | 12.9 | 0.2 | 1.259 |
 | closed book | `gemma-4-E2B-it` | 60 | **8.3%** | 0.12 | - | 1.0 | 0.0 | 72 | 18 | 1.3 | 0.0 | 0.125 |
@@ -24,6 +25,7 @@ Accuracy by question type (core60):
 | C1: fixed steps [lance] | `gemma-4-E2B-it` | 60% (n=30) | 33% (n=15) | 60% (n=15) |
 | C1 v2: steps + grounded answers [lance] | `gemma-4-E2B-it` | 67% (n=30) | 47% (n=15) | 40% (n=15) |
 | C1 v3: v2 + answer-shape check [lance] | `gemma-4-E2B-it` | 67% (n=30) | 47% (n=15) | 73% (n=15) |
+| C1 v4: v3 + backtrack, anchors, facts-first [lance] | `gemma-4-E2B-it` | 67% (n=30) | 47% (n=15) | 80% (n=15) |
 | C2: guardrailed agent | `gemma-4-E2B-it` | 43% (n=30) | 33% (n=15) | 53% (n=15) |
 | C2 v1 (guardrails logged, not enforced) | `gemma-4-E2B-it` | 36% (n=14) | 29% (n=7) | 56% (n=9) |
 | closed book | `gemma-4-E2B-it` | 7% (n=30) | 0% (n=15) | 20% (n=15) |
@@ -40,6 +42,7 @@ Accuracy by question type (core60):
 | C1: fixed steps [lance] | `gemma-4-E2B-it` | 200 | **61.0%** | 0.60 | 66% | 3.52 | 1.75 | 2607 | 193 | 14.3 | 1.1 | 1.389 |
 | C1 v2: steps + grounded answers [lance] | `gemma-4-E2B-it` | 200 | **58.5%** | 0.61 | 70% | 4.33 | 2.23 | 3824 | 306 | 22.4 | 1.4 | 2.179 |
 | C1 v3: v2 + answer-shape check [lance] | `gemma-4-E2B-it` | 200 | **64.5%** | 0.67 | 70% | 4.39 | 2.23 | 3834 | 308 | 25.6 | 1.5 | 2.491 |
+| C1 v4: v3 + backtrack, anchors, facts-first [lance] | `gemma-4-E2B-it` | 200 | **67.0%** | 0.69 | 66% | 4.38 | 2.19 | 3919 | 342 | 23.9 | 1.4 | 2.320 |
 | C2: guardrailed agent | `gemma-4-E2B-it` | 200 | **45.0%** | 0.48 | 58% | 3.52 | 1.61 | 2655 | 299 | 21.6 | 0.3 | 2.095 |
 | C2 v1 (guardrails logged, not enforced) | `gemma-4-E2B-it` | 101 | **35.6%** | 0.39 | 47% | 2.17 | 1.11 | 1308 | 182 | 12.9 | 0.2 | 1.258 |
 | closed book | `gemma-4-E2B-it` | 200 | **2.5%** | 0.04 | - | 1.0 | 0.0 | 74 | 17 | 1.3 | 0.0 | 0.122 |
@@ -56,6 +59,7 @@ Accuracy by question type (all):
 | C1: fixed steps [lance] | `gemma-4-E2B-it` | 65% (n=110) | 42% (n=50) | 72% (n=40) |
 | C1 v2: steps + grounded answers [lance] | `gemma-4-E2B-it` | 65% (n=110) | 52% (n=50) | 50% (n=40) |
 | C1 v3: v2 + answer-shape check [lance] | `gemma-4-E2B-it` | 65% (n=110) | 52% (n=50) | 80% (n=40) |
+| C1 v4: v3 + backtrack, anchors, facts-first [lance] | `gemma-4-E2B-it` | 69% (n=110) | 52% (n=50) | 80% (n=40) |
 | C2: guardrailed agent | `gemma-4-E2B-it` | 45% (n=110) | 34% (n=50) | 60% (n=40) |
 | C2 v1 (guardrails logged, not enforced) | `gemma-4-E2B-it` | 35% (n=54) | 26% (n=23) | 46% (n=24) |
 | closed book | `gemma-4-E2B-it` | 2% (n=110) | 0% (n=50) | 8% (n=40) |
