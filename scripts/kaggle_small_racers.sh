@@ -7,6 +7,7 @@ MODEL=${MODEL:-google/gemma-4-E2B-it}
 RACERS=${RACERS:-C2,D,C1,A,CB}
 TAG=${TAG:-e2b}
 OUT=/kaggle/working/results
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 mkdir -p $OUT
 nvidia-smi --query-gpu=name,memory.total --format=csv
 for g in 0 1; do

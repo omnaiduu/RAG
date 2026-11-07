@@ -34,6 +34,14 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
+    # load the LLM first: it is the biggest allocation on the GPU
+    if args.backend == "gemma":
+        from .llm import GemmaLLM
+        llm = GemmaLLM(args.model, device_map=args.device)
+    else:
+        from .llm import GroqLLM
+        llm = GroqLLM(args.model)
+
     docs = load_corpus(args.corpus)
     chunks = chunk_docs(docs)
     t0 = time.time()
@@ -47,6 +55,9 @@ def main() -> None:
     if args.emb_cache and emb is None:
         import numpy as np
         np.save(args.emb_cache, tools.emb.astype(np.float16))
+    if args.backend == "gemma":
+        import torch
+        torch.cuda.empty_cache()
     print(f"indexed {len(docs)} docs / {len(chunks)} chunks in {time.time() - t0:.1f}s", flush=True)
 
     with open(args.questions) as f:
@@ -58,12 +69,6 @@ def main() -> None:
     si, sn = map(int, args.shard.split("/"))
     questions = [q for q in questions if int(q["qid"][1:]) % sn == si]  # by id, so subsets nest
 
-    if args.backend == "gemma":
-        from .llm import GemmaLLM
-        llm = GemmaLLM(args.model, device_map=args.device)
-    else:
-        from .llm import GroqLLM
-        llm = GroqLLM(args.model)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

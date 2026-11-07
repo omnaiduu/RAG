@@ -78,6 +78,11 @@ class GemmaLLM:
 
         self.torch = torch
         self.model_id = model_id
+        try:  # the loader's warm-up grabs the whole model size in one block; skip it to load next to other models
+            import transformers.modeling_utils as _mu
+            _mu.caching_allocator_warmup = lambda *a, **k: None
+        except Exception:  # noqa: BLE001
+            pass
         self.tok = AutoTokenizer.from_pretrained(model_id)
         torch_dtype = getattr(torch, dtype)
         try:
