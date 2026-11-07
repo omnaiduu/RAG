@@ -6,7 +6,7 @@ import sys
 REPO = "https://github.com/omnaiduu/RAG.git"
 BRANCH = "claude/gallant-hamilton-rgm4j1"
 PIP = ['-U', 'transformers>=4.57', 'accelerate', 'bitsandbytes', 'bm25s', 'sentence-transformers', 'lancedb==0.41.0']
-CMD = ['env', 'MODEL=google/gemma-4-E4B-it', 'GEMMA_QUANT=8bit', 'RACERS=C1v3', 'SEARCH=lance', 'TAG=e4b-lance-v3', 'bash', 'scripts/kaggle_small_racers.sh']
+CMD = ['env', 'MODEL=google/gemma-4-E4B-it', 'GEMMA_QUANT=8bit', 'RACERS=C1v3,C2v2', 'SEARCH=lance', 'TAG=e4b-lance', 'bash', 'scripts/kaggle_small_racers.sh']
 
 subprocess.run(["git", "clone", "--depth", "1", "-b", BRANCH, REPO, "/kaggle/working/repo"], check=True)
 subprocess.run(["git", "-C", "/kaggle/working/repo", "log", "-1", "--oneline"], check=True)
