@@ -1,0 +1,26 @@
+name: Modal GPU check
+
+on:
+  workflow_dispatch:
+    inputs:
+      gpu:
+        description: "Modal GPU type (T4, L4, A10G, A100, H100)"
+        default: "T4"
+        required: true
+
+jobs:
+  gpu-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install modal
+      - name: Run GPU check on Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          GPU_TYPE: ${{ inputs.gpu }}
+        run: modal run modal_jobs/gpu_check.py
