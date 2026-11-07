@@ -366,4 +366,4 @@ class RacerB(Base):
         return run
 
 
-RACERS = {"C2v1": RacerC2, "Dv1": RacerD, "A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook}
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook}
