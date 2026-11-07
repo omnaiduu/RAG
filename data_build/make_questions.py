@@ -333,6 +333,8 @@ def main() -> None:
 
     gens = [json.loads(l) for l in gen_path.read_text().splitlines()]
     valid = [g for g in gens if g["reject"] is None]
+    # anchor rule: a multi-hop question must name its first article so a searcher has a starting point
+    valid = [g for g in valid if g["kind"] == "comparison" or normalize(core(g["titles"][0])) in normalize(g["question"])]
     # dedupe by normalized question
     uniq, keys = [], set()
     for g in valid:
