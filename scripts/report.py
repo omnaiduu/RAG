@@ -24,7 +24,13 @@ T4_PER_HOUR = 0.35
 
 LABELS = {"A": "A: basic RAG", "B": "B: big agent", "C1": "C1: fixed steps", "C2": "C2: guardrailed agent",
           "D": "D: free small agent", "CB": "closed book",
-          "C2v1": "C2 v1 (guardrails logged, not enforced)", "Dv1": "D v1 (strict parser)"}
+          "C2v1": "C2 v1 (guardrails logged, not enforced)", "Dv1": "D v1 (strict parser)",
+          "C1v2": "C1 v2: steps + grounded answers"}
+
+
+def label(racer: str) -> str:
+    base, _, backend = racer.partition("@")
+    return LABELS.get(base, base) + (f" [{backend}]" if backend else "")
 
 
 def cost_per_1k(row: dict, model: str) -> float:
@@ -51,7 +57,7 @@ def main() -> None:
         key = f"{racer}|{model}"
         full = score(rows, questions, chunk_title)
         core_rows = [r for r in rows if r["qid"] in core]
-        summary[key] = {"racer": racer, "model": model, "label": LABELS.get(racer, racer),
+        summary[key] = {"racer": racer, "model": model, "label": label(racer),
                         "all": full, "core60": score(core_rows, questions, chunk_title) if core_rows else None,
                         "errors": sum(1 for r in rows if r.get("flags", {}).get("error"))}
         for part in ("all", "core60"):
@@ -73,7 +79,7 @@ def main() -> None:
             if not s[part]:
                 continue
             o = s[part]["overall"]
-            ev = "-" if o["all_support_found"] is None or s["racer"] == "CB" else f"{o['all_support_found']:.0%}"
+            ev = "-" if o["all_support_found"] is None or s["racer"].startswith("CB") else f"{o['all_support_found']:.0%}"
             lines.append(f"| {s['label']} | `{s['model'].split('/')[-1]}` | {o['n']} | **{o['accuracy']:.1%}** | "
                          f"{o['f1']:.2f} | {ev} | {o['llm_calls']} | {o['tool_calls']} | {o['prompt_tokens']:.0f} | "
                          f"{o['completion_tokens']:.0f} | {o['llm_seconds']:.1f} | {o['tool_seconds']:.1f} | "
@@ -100,7 +106,7 @@ def main() -> None:
         return
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
     for key, s in summary.items():
-        if not s["core60"] or s["racer"] == "CB":
+        if not s["core60"] or s["racer"].startswith("CB"):
             continue
         o = s["core60"]["overall"]
         ax.scatter(o["cost_per_1k_usd"], o["accuracy"], s=70)

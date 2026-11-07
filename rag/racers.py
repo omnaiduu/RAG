@@ -28,6 +28,7 @@ TOOL_HELP = (
     "hybrid(query): bm25 + vector combined and reranked; the strongest general search."
 )
 GIVE_UP = re.compile(r"\b(unknown|not found|no information|n/?a|none|could not|cannot|not (?:mentioned|available|specified|provided))\b", re.I)
+ANAPHOR = re.compile(r"\b(that|this|these|those|it|its|he|she|his|her|they|their|the same)\b", re.I)
 OBS_WORDS = 90  # words per passage shown to every agent
 K = 5
 
@@ -366,4 +367,119 @@ class RacerB(Base):
         return run
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook}
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", str(s).lower())).strip()
+
+
+class RacerC1v2(Base):
+    """C1 with two code-enforced fixes, both general (nothing about this benchmark's question types):
+
+    1. Decompose: the model writes the lookup steps once ("Where was Messi born?" -> "What is the capital of #1?").
+       Code runs them in order, filling #1 with step 1's answer, so it cannot stop half-way. A final answer that
+       equals an intermediate answer is rejected once.
+    2. Grounded answers: every answer form also returns the sentence it copied from. Code checks that the
+       answer text really occurs in the retrieved passages (or facts/question); if not, it searches again once.
+    """
+    name = "C1v2"
+    max_steps = 3
+
+    PLAN = (
+        "Break the question into the smallest lookup steps, in order (1 to 3 steps). Write each step as a short "
+        "question. If a step needs the answer of an earlier step, write #1 (or #2) in its place.\n"
+        'Example: "What is the capital of the country where Messi was born?" -> '
+        '{"steps": ["Where was Messi born?", "What is the capital of #1?"], "exact_terms": ["Messi"]}\n'
+        'Example: "Which is taller, the Eiffel Tower or Big Ben?" -> '
+        '{"steps": ["How tall is the Eiffel Tower?", "How tall is Big Ben?"], "exact_terms": ["Eiffel Tower", "Big Ben"]}\n'
+        "exact_terms: names or titles copied exactly from the question.\n"
+        "Reply with only JSON.\n\nQUESTION: {q}")
+
+    STEP = (
+        "Answer the sub-question using only the passages. Reply with only JSON:\n"
+        '{{"quote": "<copy the one sentence from the passages that contains the answer>", '
+        '"answer": "<shortest answer, copied word for word from that sentence>"}}\n'
+        'If the passages do not contain it, use "answer": "unknown".\n\n'
+        "SUB-QUESTION: {q}\n\nPASSAGES:\n{p}")
+
+    FINAL = (
+        "Answer the question using the facts and passages. Reply with only JSON:\n"
+        '{{"quote": "<the sentence or fact the answer comes from>", '
+        '"answer": "<shortest possible answer: a name, date, number or few words>", "sources": ["<passage ids>"]}}\n'
+        'If the answer is not there, use "answer": "unknown".{note}\n\n'
+        "QUESTION: {q}\n\nFACTS FOUND:\n{f}\n\nPASSAGES:\n{p}")
+
+    def _grounded(self, answer: str, idxs: list[int], extra: str = "") -> bool:
+        a = _norm(answer)
+        if not a or GIVE_UP.search(answer):
+            return False
+        hay = [_norm(self.tools.texts[i]) for i in idxs] + [_norm(extra)]
+        return any(a in h for h in hay)
+
+    def _step(self, run: Run, n: int, q: str, question: str, exact: list[str], kept: list[int]) -> tuple[str, str]:
+        obj: dict = {}
+        for attempt in (0, 1):
+            query = q if attempt == 0 else f"{q} {question}"  # second try: widen with the full question
+            idxs = self.search(run, "hybrid", query, exact_terms=exact or None)
+            kept += [i for i in idxs if i not in kept]
+            # full 140-word passages: with a 90-word cut, 20 words of every chunk are never shown
+            obj = self.ask_json(run, self.STEP.format(q=q, p=self.tools.format(idxs, 140)), max_new_tokens=160)
+            ans = str(obj.get("answer") or "unknown")
+            ok = self._grounded(ans, idxs)
+            run.trace.append({"step": f"step{n + 1}", "attempt": attempt, "query": query,
+                              "hits": [self.tools.chunks[i].id for i in idxs], "out": obj, "grounded": ok})
+            if ok:
+                return ans, str(obj.get("quote", ""))
+            run.flags["ungrounded_step"] = run.flags.get("ungrounded_step", 0) + 1
+        return str(obj.get("answer") or "unknown"), str(obj.get("quote", ""))
+
+    def solve(self, question: str) -> Run:
+        run = Run()
+        plan = self.ask_json(run, self.PLAN.replace("{q}", question), max_new_tokens=200)
+        run.trace.append({"step": "plan", "out": plan})
+        steps = [str(s) for s in plan.get("steps", []) if isinstance(s, str) and s.strip()][: self.max_steps]
+        steps = steps or [question]
+        exact = [str(t) for t in plan.get("exact_terms", []) if isinstance(t, str) and t.strip()][:3]
+
+        answers: list[str] = []
+        facts: list[str] = []
+        kept: list[int] = []
+        used_as_input: set[str] = set()
+        for n, step in enumerate(steps):
+            known = [a if a and not GIVE_UP.search(a) else "" for a in answers]
+            refs = [int(m) for m in re.findall(r"#(\d)", step)]
+            if any(not (0 < r <= len(known)) or not known[r - 1] for r in refs):
+                q = question  # an earlier step failed: fall back to the whole question
+            else:
+                q = re.sub(r"#(\d)", lambda m: known[int(m.group(1)) - 1], step)
+                used_as_input.update(known[r - 1] for r in refs)
+                if n > 0 and not refs and known and known[-1] and ANAPHOR.search(step):
+                    q = f"{step} ({known[-1]})"  # "that series" -> keep the name found in the previous step
+                    used_as_input.add(known[-1])
+            terms = [t for t in exact if t.lower() in q.lower()]
+            terms = [a for a in used_as_input if a and a.lower() in q.lower()] + terms
+            ans, quote = self._step(run, n, q, question, terms[:3], kept)
+            answers.append(ans)
+            facts.append(f"{q} -> {ans}" + (f' (from: "{quote[:200]}")' if quote else ""))
+
+        facts_txt = "\n".join(f"- {f}" for f in facts)
+        note = ""
+        for attempt in (0, 1):
+            obj = self.ask_json(run, self.FINAL.format(q=question, f=facts_txt, p=self.fmt(kept[-10:]), note=note),
+                                max_new_tokens=160)
+            ans = str(obj.get("answer") or "unknown")
+            run.trace.append({"step": "answer", "attempt": attempt, "out": obj})
+            if _norm(ans) in {_norm(a) for a in used_as_input} and attempt == 0:
+                run.flags["bridge_rejected"] = run.flags.get("bridge_rejected", 0) + 1
+                note = (f'\nNote: "{ans}" is only an intermediate fact (the answer to an earlier step), '
+                        "not what the question asks for.")
+                continue
+            if not self._grounded(ans, kept, facts_txt + " " + question) and attempt == 0:
+                run.flags["ungrounded_final"] = run.flags.get("ungrounded_final", 0) + 1
+                note = "\nNote: your last answer was not found in the facts or passages. Copy it from them."
+                continue
+            break
+        run.answer = ans
+        run.sources = [str(s) for s in obj.get("sources", []) if isinstance(s, (str, int))]
+        return run
+
+
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2}

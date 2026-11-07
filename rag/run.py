@@ -15,7 +15,7 @@ import traceback
 from pathlib import Path
 
 from .racers import RACERS
-from .tools import SearchTools, chunk_docs, load_corpus
+from .tools import chunk_docs, load_corpus
 
 
 def main() -> None:
@@ -31,6 +31,8 @@ def main() -> None:
     ap.add_argument("--shard", default="0/1", help="i/n: run every n-th question starting at i")
     ap.add_argument("--subset", default="", help="only questions whose 'subset' list contains this tag")
     ap.add_argument("--emb-cache", default="", help="npy file to load/save chunk embeddings")
+    ap.add_argument("--search", choices=["memory", "lance"], default="memory",
+                    help="memory: bm25s + numpy + Python grep; lance: one LanceDB table on disk")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -51,8 +53,9 @@ def main() -> None:
         emb = np.load(args.emb_cache)
         if emb.shape[0] != len(chunks):
             emb = None
-    tools = SearchTools(chunks, device=args.tools_device or args.device, embeddings=emb)
-    if args.emb_cache and emb is None:
+    from .lance_tools import make_tools
+    tools = make_tools(args.search, chunks, args.tools_device or args.device, emb)
+    if args.emb_cache and emb is None and getattr(tools, "emb", None) is not None:
         import numpy as np
         np.save(args.emb_cache, tools.emb.astype(np.float16))
     if args.backend == "gemma":
@@ -83,7 +86,7 @@ def main() -> None:
             racer = RACERS[name](llm, tools)
             t_r = time.time()
             for n, q in enumerate(questions):
-                if (name, q["qid"]) in done:
+                if (name + ("@lance" if args.search == "lance" else ""), q["qid"]) in done:
                     continue
                 try:
                     rec = racer.solve(q["question"]).record()
@@ -95,7 +98,7 @@ def main() -> None:
                            "tool_seconds": 0.0, "llm": {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
                                                         "seconds": 0.0},
                            "flags": {"error": repr(exc), "tb": traceback.format_exc()[-800:]}}
-                rec.update({"racer": name, "qid": q["qid"], "model": args.model, "gold": q["answer"]})
+                rec.update({"racer": name + ("@lance" if args.search == "lance" else ""), "qid": q["qid"], "model": args.model, "gold": q["answer"]})
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 f.flush()
                 if (n + 1) % 25 == 0:
