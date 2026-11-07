@@ -1,0 +1,10 @@
+Head-to-head on the 31 questions racer B has answered
+A              9/31 = 29.0%
+B              24/31 = 77.4%
+C1             18/31 = 58.1%
+C1@lance       19/31 = 61.3%
+C1v2@lance     18/31 = 58.1%
+C1v3@lance     21/31 = 67.7%
+C2             15/31 = 48.4%
+CB             3/31 = 9.7%
+D              6/31 = 19.4%
