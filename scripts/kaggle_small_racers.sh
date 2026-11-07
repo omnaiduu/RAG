@@ -13,7 +13,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv
 for g in 0 1; do
   cat results/raw/gemma-$TAG-*.jsonl 2>/dev/null > $OUT/$TAG-shard$g.jsonl
   ( for subset in core60 ""; do
-      CUDA_VISIBLE_DEVICES=$g python -m rag.run --backend gemma --model "$MODEL" --device cuda:0 --racers "$RACERS" \
+      CUDA_VISIBLE_DEVICES=$g python -m rag.run --backend gemma --model "$MODEL" --device cuda:0 --racers "$RACERS" --emb-cache data/emb_bge_small_f16.npy \
         --shard $g/2 ${subset:+--subset $subset} --out $OUT/$TAG-shard$g.jsonl
     done ) > $OUT/$TAG-shard$g.log 2>&1 &
 done

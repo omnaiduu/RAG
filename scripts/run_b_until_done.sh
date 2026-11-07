@@ -6,7 +6,7 @@ target=$(python3 -c "import json;print(sum('$SUBSET' in json.loads(l).get('subse
 target=$((target * $(echo $RACERS | tr ',' '\n' | wc -l)))
 while true; do
   HF_HUB_DISABLE_XET=1 python3 -m rag.run --backend groq --model $MODEL --racers $RACERS --device cpu \
-    ${SUBSET:+--subset $SUBSET} --emb-cache data/cache/emb_bge_small.npy --out $OUT 2>&1 | grep -E "STOP|done in|/"
+    ${SUBSET:+--subset $SUBSET} --emb-cache data/emb_bge_small_f16.npy --out $OUT 2>&1 | grep -E "STOP|done in|/"
   n=$(wc -l < $OUT)
   echo "$(date -u +%H:%M) $n/$target records"
   [ "$n" -ge "$target" ] && break
