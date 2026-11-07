@@ -20,7 +20,11 @@ jobs:
       - run: pip install modal
       - name: Run GPU check on Modal
         env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          RAW_MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          RAW_MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           GPU_TYPE: ${{ inputs.gpu }}
-        run: modal run modal_jobs/gpu_check.py
+        run: |
+          # Strip stray whitespace/newlines that sneak in when secrets are pasted.
+          export MODAL_TOKEN_ID="$(printf '%s' "$RAW_MODAL_TOKEN_ID" | tr -d '[:space:]')"
+          export MODAL_TOKEN_SECRET="$(printf '%s' "$RAW_MODAL_TOKEN_SECRET" | tr -d '[:space:]')"
+          modal run modal_jobs/gpu_check.py
