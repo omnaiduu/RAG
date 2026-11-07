@@ -4,10 +4,14 @@ Research project: a fast, deterministic small-model RAG pipeline (grep + BM25 + 
 
 ## Compute
 
-GPU jobs run on [Modal](https://modal.com). From a local machine with the Modal CLI set up:
+GPU jobs run on **Kaggle** (free, 2× Tesla T4, 16 GB each, ~30 GPU-hours/week). Each job is a folder under `kaggle_jobs/` with a `kernel-metadata.json`:
 
 ```bash
-modal run modal_jobs/gpu_check.py
+kaggle kernels push -p kaggle_jobs/gpu_check          # submit
+kaggle kernels status ommnaidu/rag-gpu-check          # poll
+kaggle kernels output ommnaidu/rag-gpu-check -p out/  # fetch results
 ```
 
-Or from GitHub: **Actions → Modal GPU check → Run workflow** (needs the `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` repository secrets).
+Needs a Kaggle API token in `KAGGLE_API_TOKEN` or `~/.kaggle/access_token` (never commit it).
+
+`modal_jobs/` holds the same smoke test for [Modal](https://modal.com) (needs a payment method on the Modal account): `modal run modal_jobs/gpu_check.py`, or **Actions → Modal GPU check** on GitHub.
