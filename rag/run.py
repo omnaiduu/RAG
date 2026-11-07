@@ -56,7 +56,7 @@ def main() -> None:
     if args.limit:
         questions = questions[: args.limit]
     si, sn = map(int, args.shard.split("/"))
-    questions = questions[si::sn]
+    questions = [q for q in questions if int(q["qid"][1:]) % sn == si]  # by id, so subsets nest
 
     if args.backend == "gemma":
         from .llm import GemmaLLM

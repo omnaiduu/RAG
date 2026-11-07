@@ -27,6 +27,7 @@ TOOL_HELP = (
     "vector(query): meaning-based search, works with paraphrases.\n"
     "hybrid(query): bm25 + vector combined and reranked; the strongest general search."
 )
+GIVE_UP = re.compile(r"\b(unknown|not found|no information|n/?a|none|could not|cannot|not (?:mentioned|available|specified|provided))\b", re.I)
 OBS_WORDS = 90  # words per passage shown to every agent
 K = 5
 
@@ -191,7 +192,8 @@ class RacerC2(Base):
             steps_left = self.max_steps - step
             tools_used = "\n".join(f"{n + 1}. {t} \"{q}\" -> {c} results" for n, (t, q, c) in enumerate(used)) or "(none yet)"
             prompt = (
-                "You are a search agent. Each turn you pick ONE action. Tools:\n" + TOOL_HELP +
+                "You are a search agent. Each turn you pick ONE action. Questions often need several hops: "
+                "find the thing the question describes, then search for it by name. Tools:\n" + TOOL_HELP +
                 "\nanswer: give the final answer when the facts and results are enough.\n\n"
                 "Reply with only JSON:\n"
                 '{"reason": "<one short sentence>", "tool": "grep|bm25|vector|hybrid|answer", '
@@ -216,10 +218,18 @@ class RacerC2(Base):
             note = ""
             final = str(act.get("answer") or "").strip() or query
             if tool == "answer" and final:
-                if not act.get("sources") and run.seen:
-                    run.flags["answer_without_sources"] = True
+                sources = [str(s) for s in act.get("sources", []) if isinstance(s, (str, int)) and str(s).strip()]
+                give_up = bool(GIVE_UP.search(final))
+                # Guardrail: while steps remain, a give-up or an uncited answer is rejected by the code.
+                if steps_left > 1 and (give_up or not sources):
+                    run.flags["rejected_answer"] = run.flags.get("rejected_answer", 0) + 1
+                    note = ("You may not give up while steps remain. " if give_up else
+                            "An answer must cite passage ids in sources. ") + \
+                           "Search for the missing fact: first find the person/thing the question describes, " \
+                           "then search for it by name."
+                    continue
                 run.answer = final
-                run.sources = [str(s) for s in act.get("sources", []) if isinstance(s, (str, int))]
+                run.sources = sources
                 return run
             if tool not in TOOLS:
                 tool, run.flags["bad_tool"] = "hybrid", run.flags.get("bad_tool", 0) + 1
@@ -244,7 +254,20 @@ class RacerD(Base):
     """Free ReAct agent with full history and no guardrails (besides a hard step cap)."""
     name = "D"
     max_steps = 8
-    ACTION = re.compile(r"Action:\s*(\w+)\s*\n+\s*Action Input:\s*(.+?)(?:\n|$)", re.S)
+    @staticmethod
+    def parse_action(text: str) -> tuple[str, str] | None:
+        """Accept 'Action: tool\\nAction Input: x' and 'Action: tool(x)' (markdown stripped)."""
+        t = text.replace("**", "").replace("`", "")
+        m = re.search(r"Action:\s*(\w+)\s*(?:\((.*?)\))?\s*(?:\n|$)", t)
+        if not m:
+            return None
+        tool, inline = m.group(1).lower(), (m.group(2) or "").strip().strip('"\'')
+        m2 = re.search(r"Action Input:\s*(.+?)(?:\n|$)", t[m.end() - 1:])
+        arg = m2.group(1).strip().strip('"\'') if m2 else ""
+        if inline and inline.lower() not in {"query", "phrase", "input", "final answer", "answer"}:
+            arg = arg or inline
+            arg = inline if not m2 else arg
+        return (tool, arg) if arg else None
 
     def solve(self, question: str) -> Run:
         run = Run()
@@ -256,13 +279,14 @@ class RacerD(Base):
             f"Question: {question}")}]
         for step in range(self.max_steps):
             text = self.ask(run, messages, max_new_tokens=200)
-            m = self.ACTION.search(text)
             run.trace.append({"step": step + 1, "out": text[:600]})
-            if not m:
+            parsed = self.parse_action(text)
+            if not parsed:
                 run.flags["unparsed"] = True
-                run.answer = text.strip().splitlines()[-1] if text.strip() else "unknown"
+                fa = re.search(r"Final Answer:\s*(.+)", text)
+                run.answer = fa.group(1).strip() if fa else (text.strip().splitlines()[-1] if text.strip() else "unknown")
                 return run
-            tool, arg = m.group(1).lower(), m.group(2).strip().strip('"')
+            tool, arg = parsed
             if tool == "answer":
                 run.answer = arg
                 return run
@@ -342,4 +366,4 @@ class RacerB(Base):
         return run
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook}
+RACERS = {"C2v1": RacerC2, "Dv1": RacerD, "A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook}
