@@ -655,4 +655,116 @@ class RacerC1v4(RacerC1v3):
         return self._shape_fix(run, question)
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4}
+class RacerC2v2(RacerC2):
+    """C2 with the general checks that helped C1. The model still picks the tool and query every turn.
+
+    - whole 140-word passages (the 90-word cut hid the answer in some chunks)
+    - an answer must occur in a passage it saw or in its saved facts (grounded), else rejected while turns remain
+    - an answer must have the form the question asks for (yes/no, or one of the named options)
+    - tool advice: hybrid by default, grep for exact names (bm25 was its favourite and its weakest first tool)
+    - facts are saved with the sentence they came from, so earlier results are not lost
+    """
+    name = "C2v2"
+    max_steps = 5
+    PASSAGE_WORDS = 140
+
+    def solve(self, question: str) -> Run:
+        run = Run()
+        facts: list[str] = []
+        used: list[tuple[str, str, int]] = []
+        last: list[int] = []
+        note = ""
+        for step in range(self.max_steps):
+            steps_left = self.max_steps - step
+            tools_used = "\n".join(f"{n + 1}. {t} \"{q}\" -> {c} results" for n, (t, q, c) in enumerate(used)) or "(none yet)"
+            prompt = (
+                "You are a search agent. Each turn you pick ONE action. Questions often need several hops: "
+                "find the thing the question describes, then search for it by name. Tools:\n" + TOOL_HELP +
+                "\nanswer: give the final answer when the facts and results are enough.\n"
+                "Advice: use hybrid unless you have an exact name or title, then grep. Put the most specific "
+                "names from the question in your query.\n\n"
+                "Reply with only JSON:\n"
+                '{"reason": "<one short sentence>", "tool": "grep|bm25|vector|hybrid|answer", '
+                '"query": "<search text; empty if tool is answer>", '
+                '"new_fact": "<a fact from LAST RESULTS that helps, with the words copied from the passage, or empty>", '
+                '"answer": "<only if tool is answer: the shortest final answer, copied from the passages>", '
+                '"sources": ["<passage ids supporting the answer, only when answering>"]}\n\n'
+                f"QUESTION: {question}\n\n"
+                "FACTS SO FAR:\n" + ("\n".join(f"- {f}" for f in facts) or "(none yet)") + "\n\n"
+                f"TOOLS USED:\n{tools_used}\n\n"
+                f"LAST RESULTS:\n{self.tools.format(last, self.PASSAGE_WORDS) if used else '(no search yet)'}\n\n"
+                + (f"NOTE: {note}\n" if note else "")
+                + f"STEPS LEFT: {steps_left}"
+            )
+            act = self.ask_json(run, prompt, max_new_tokens=200)
+            run.trace.append({"step": step + 1, "out": act})
+            nf = str(act.get("new_fact") or "").strip()
+            if nf and nf.lower() not in {f.lower() for f in facts}:
+                facts.append(nf)
+            tool = str(act.get("tool") or "").lower().strip()
+            query = str(act.get("query") or "").strip()
+            note = ""
+            final = str(act.get("answer") or "").strip() or query
+            if tool == "answer" and final:
+                sources = [str(x) for x in act.get("sources", []) if isinstance(x, (str, int)) and str(x).strip()]
+                problem = ""
+                if GIVE_UP.search(final):
+                    problem = "You may not give up while steps remain."
+                elif not sources:
+                    problem = "An answer must cite passage ids in sources."
+                elif not self._grounded(final, run, facts, question):
+                    run.flags["ungrounded_answer"] = run.flags.get("ungrounded_answer", 0) + 1
+                    problem = f'"{final}" does not appear in any passage you saw. Copy the answer from a passage.'
+                elif answer_shape_problem(question, final):
+                    run.flags["shape_rejected"] = run.flags.get("shape_rejected", 0) + 1
+                    problem = answer_shape_problem(question, final)
+                if steps_left > 1 and problem:
+                    run.flags["rejected_answer"] = run.flags.get("rejected_answer", 0) + 1
+                    note = problem + " If a fact is missing, search for it: first find the person/thing the " \
+                                     "question describes, then search for it by name."
+                    continue
+                run.answer, run.sources = final, sources
+                return self._shape_fix2(run, question, facts)
+            if tool not in TOOLS:
+                tool, run.flags["bad_tool"] = "hybrid", run.flags.get("bad_tool", 0) + 1
+            if not query:
+                query = question
+            if any(t == tool and q.lower() == query.lower() for t, q, _ in used):
+                run.flags["blocked_repeat"] = run.flags.get("blocked_repeat", 0) + 1
+                note = f'You already ran {tool} "{query}". Use a different query or tool.'
+                used.append((tool, query + " [BLOCKED]", 0))
+                continue
+            last = self.search(run, tool, query)
+            used.append((tool, query, len(last)))
+            if not last:
+                note = "The last search returned no results. Try a different tool or a shorter query."
+        run.flags["forced_answer"] = True
+        self.answer_form(run, question, self.tools.format([self.tools.by_id[c] for c in run.seen[-8:]],
+                                                          self.PASSAGE_WORDS), facts)
+        return self._shape_fix2(run, question, facts)
+
+    def _grounded(self, answer: str, run: Run, facts: list[str], question: str) -> bool:
+        a = _norm(answer)
+        if not a:
+            return False
+        hay = [_norm(self.tools.texts[self.tools.by_id[c]]) for c in run.seen] + [_norm(" ".join(facts)), _norm(question)]
+        return any(a in h for h in hay)
+
+    def _shape_fix2(self, run: Run, question: str, facts: list[str]) -> Run:
+        problem = answer_shape_problem(question, run.answer)
+        if not problem:
+            return run
+        run.flags["shape_retry"] = 1
+        obj = self.ask_json(run, (
+            "Answer the question from the facts. First write the values you compare, then the answer.\n"
+            'Reply with only JSON: {"reasoning": "<one short sentence>", "answer": "<the answer>"}\n'
+            f"Note: {problem}\n\nQUESTION: {question}\n\nFACTS FOUND:\n" + "\n".join(f"- {f}" for f in facts)),
+            max_new_tokens=160)
+        run.trace.append({"step": "shape_retry", "out": obj})
+        ans = str(obj.get("answer") or "")
+        if ans and not answer_shape_problem(question, ans):
+            run.answer = ans
+        return run
+
+
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C2v2": RacerC2v2}
