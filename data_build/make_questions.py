@@ -34,6 +34,7 @@ from rag.evaluate import correct, normalize  # noqa: E402
 from rag.llm import GroqLLM, parse_json  # noqa: E402
 
 GEN_MODELS = ["qwen/qwen3.8-27b", "openai/gpt-oss-20b"]
+CB_MODELS = list(GEN_MODELS)
 
 
 def opener(p):
@@ -267,9 +268,11 @@ def closed_book_filter(items: list[dict], out_path: Path) -> list[dict]:
     if out_path.exists():
         for l in out_path.read_text().splitlines():
             r = json.loads(l)
-            if not any(str(a).startswith("ERROR") for a in r["closed_book"].values()):
-                done[r["question"]] = r  # errored checks are redone
-    llms = {m: GroqLLM(m, reasoning_effort="none" if "qwen" in m else "low") for m in GEN_MODELS}
+            ok = [a for a in r["closed_book"].values() if not str(a).startswith("ERROR")]
+            if ok:
+                r["leaked"] = any(correct(a, [r["answer"]]) for a in ok) if "answer" in r else r["leaked"]
+                done[r["question"]] = r  # records where every model errored are redone
+    llms = {m: GroqLLM(m, reasoning_effort="none" if "qwen" in m else "low") for m in CB_MODELS}
     todo = [it for it in items if it["question"] not in done]
     for n, it in enumerate(todo):
         res = {}
@@ -281,10 +284,10 @@ def closed_book_filter(items: list[dict], out_path: Path) -> list[dict]:
                 res[m] = str((parse_json(text) or {}).get("answer", "unknown"))
             except Exception as exc:  # noqa: BLE001
                 res[m] = f"ERROR {exc}"[:120]
-        errored = any(a.startswith("ERROR") for a in res.values())
-        rec = {"question": it["question"], "closed_book": res,
-               # an unverified question counts as leaked, so it is dropped rather than kept unchecked
-               "leaked": errored or any(correct(a, [it["answer"]]) for a in res.values())}
+        ok = [a for a in res.values() if not a.startswith("ERROR")]
+        rec = {"question": it["question"], "answer": it["answer"], "closed_book": res,
+               # dropped if any model that answered got it right; unverified (no model answered) is dropped too
+               "leaked": (not ok) or any(correct(a, [it["answer"]]) for a in ok)}
         done[it["question"]] = rec
         with open(out_path, "a") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -303,7 +306,9 @@ def main() -> None:
     ap.add_argument("--n-compare", type=int, default=110)
     ap.add_argument("--final", default="bridge:110,bridge3:50,comparison:40")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--cb-models", default=",".join(GEN_MODELS), help="models used by the closed-book filter")
     args = ap.parse_args()
+    CB_MODELS[:] = args.cb_models.split(",")
 
     out = Path(args.out)
     with opener(args.corpus) as f:
