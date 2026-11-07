@@ -482,4 +482,42 @@ class RacerC1v2(Base):
         return run
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2}
+YESNO_Q = re.compile(r"^\s*(is|was|were|are|did|do|does|has|have|had|can|could|will|would)\b", re.I)
+# "Who was born earlier, X or Y?" / "Which of X and Y is older?": a choice between named options
+CHOICE_Q = re.compile(r"^\s*which of\b|^\s*(who|which)\b[^?]*,[^,?]*\bor\b[^,?]*\?\s*$", re.I)
+
+
+def answer_shape_problem(question: str, answer: str) -> str:
+    """General check that the answer has the form the question asks for (no dataset rules)."""
+    a = _norm(answer)
+    if YESNO_Q.search(question) and not CHOICE_Q.search(question):
+        return "" if a in {"yes", "no"} else 'This is a yes/no question: the answer must be "yes" or "no".'
+    if CHOICE_Q.search(question) and a and a not in _norm(question):
+        return "The question asks you to choose one of the options it names: answer with that option, copied from the question."
+    return ""
+
+
+class RacerC1v3(RacerC1v2):
+    """C1 v2 plus an answer-shape check on the final answer (yes/no, or one of the named options)."""
+    name = "C1v3"
+
+    def solve(self, question: str) -> Run:
+        run = super().solve(question)
+        problem = answer_shape_problem(question, run.answer)
+        if not problem:
+            return run
+        run.flags["shape_retry"] = 1
+        facts = [t for t in run.trace if t.get("step", "").startswith("step") and t.get("grounded") is not None]
+        facts_txt = "\n".join(f'- {t["query"]} -> {t["out"].get("answer", "unknown")}' for t in facts)
+        obj = self.ask_json(run, (
+            "Answer the question from the facts. First write the values you compare, then the answer.\n"
+            'Reply with only JSON: {"reasoning": "<one short sentence>", "answer": "<the answer>"}\n'
+            f"Note: {problem}\n\nQUESTION: {question}\n\nFACTS FOUND:\n{facts_txt}"), max_new_tokens=160)
+        run.trace.append({"step": "shape_retry", "out": obj})
+        ans = str(obj.get("answer") or "")
+        if ans and not answer_shape_problem(question, ans):
+            run.answer = ans
+        return run
+
+
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3}
