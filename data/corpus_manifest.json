@@ -1,0 +1,21 @@
+{
+  "window_start": "2026-10-09T10:23:36Z",
+  "window_end": "2026-11-07T10:23:36Z",
+  "fetched_at": "2026-11-07T10:23:36Z",
+  "n_docs": 4102,
+  "kinds": {
+    "new": 711,
+    "linked": 1611,
+    "hop3": 1780
+  },
+  "args": {
+    "out": "/kaggle/working/corpus",
+    "days": 29,
+    "n_new": 700,
+    "bridges_per_doc": 3,
+    "hop3_per_bridge": 1,
+    "min_bytes": 7000,
+    "max_words": 2500,
+    "seed": 0
+  }
+}

@@ -13,8 +13,8 @@ subprocess.run(["git", "-C", "/kaggle/working/repo", "log", "-1", "--oneline"], 
 subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "torchao"], check=False)
 if PIP:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", *PIP], check=True)
-env = {**os.environ, "PYTHONPATH": "/kaggle/working/repo", "HF_HOME": "/kaggle/working/hf-home",
+env = {**os.environ, "PYTHONPATH": "/kaggle/working/repo", "HF_HOME": "/tmp/hf-home",
        "TOKENIZERS_PARALLELISM": "false"}
 rc = subprocess.run(CMD, cwd="/kaggle/working/repo", env=env).returncode
-subprocess.run(["rm", "-rf", "/kaggle/working/repo", "/kaggle/working/hf-home"])
+subprocess.run(["rm", "-rf", "/kaggle/working/repo",])
 sys.exit(rc)
