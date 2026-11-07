@@ -102,6 +102,14 @@ class GemmaLLM:
         return text, Usage(1, int(n_in), int(new.shape[0]), time.time() - t0)
 
 
+class ToolCallError(RuntimeError):
+    """Groq rejected the model's tool call because its arguments were not valid JSON."""
+
+    def __init__(self, failed_generation: str):
+        super().__init__("tool_use_failed")
+        self.failed_generation = failed_generation
+
+
 class GroqLLM:
     """Groq chat completions. The key is injected by the sandbox proxy, so a placeholder is fine there."""
 
@@ -139,6 +147,12 @@ class GroqLLM:
             if r.status_code >= 500:
                 time.sleep(2 ** min(attempt, 5))
                 continue
+            if r.status_code == 400 and "tool_use_failed" in r.text:
+                try:
+                    gen = r.json()["error"].get("failed_generation", "")
+                except Exception:  # noqa: BLE001
+                    gen = ""
+                raise ToolCallError(gen)
             if r.status_code != 200:
                 raise RuntimeError(f"Groq {r.status_code}: {r.text[:500]}")
             data = r.json()

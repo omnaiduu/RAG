@@ -17,7 +17,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from .llm import Usage, parse_json
+from .llm import ToolCallError, Usage, parse_json
 from .tools import SearchTools
 
 TOOLS = ("grep", "bm25", "vector", "hybrid")
@@ -301,7 +301,21 @@ class RacerB(Base):
         for step in range(self.max_steps + 1):
             if step == self.max_steps:
                 messages.append({"role": "user", "content": "Step limit reached. Call answer now."})
-            msg, usage = self.llm.raw(messages, max_tokens=1024, tools=tools)
+            try:
+                msg, usage = self.llm.raw(messages, max_tokens=1024, tools=tools)
+            except ToolCallError as err:
+                run.flags["tool_json_errors"] = run.flags.get("tool_json_errors", 0) + 1
+                run.llm.calls += 1
+                if run.flags["tool_json_errors"] <= 1:
+                    messages.append({"role": "user", "content": "Your last tool call had invalid JSON arguments. "
+                                     "Call the tool again with valid JSON arguments."})
+                    continue
+                # second failure: salvage the answer text from the rejected generation
+                gen = err.failed_generation
+                m = re.search(r'"answer"\s*:\s*"([^"]+)"', gen) or re.search(r'"arguments"\s*:\s*([^【{}"]+)', gen)
+                run.answer = (m.group(1).strip() if m else "") or "unknown"
+                run.flags["salvaged_answer"] = True
+                return run
             run.llm.add(usage)
             calls = msg.get("tool_calls") or []
             if not calls:
