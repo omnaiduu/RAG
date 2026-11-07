@@ -85,11 +85,17 @@ class GemmaLLM:
             pass
         self.tok = AutoTokenizer.from_pretrained(model_id)
         torch_dtype = getattr(torch, dtype)
+        kw = {"dtype": torch_dtype, "device_map": device_map}
+        # GEMMA_QUANT=8bit: int8 weights (bitsandbytes), so a ~8B-parameter model fits on one 16 GB T4
+        self.quant = os.environ.get("GEMMA_QUANT", "")
+        if self.quant == "8bit":
+            from transformers import BitsAndBytesConfig
+            kw["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
         try:
-            self.model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch_dtype, device_map=device_map)
+            self.model = AutoModelForCausalLM.from_pretrained(model_id, **kw)
         except (ValueError, KeyError):
             from transformers import AutoModelForImageTextToText
-            self.model = AutoModelForImageTextToText.from_pretrained(model_id, dtype=torch_dtype, device_map=device_map)
+            self.model = AutoModelForImageTextToText.from_pretrained(model_id, **kw)
         self.model.eval()
 
     def chat(self, messages: list[dict], max_new_tokens: int = 256) -> tuple[str, Usage]:
