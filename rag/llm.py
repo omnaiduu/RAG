@@ -147,7 +147,7 @@ class GroqLLM:
             if r.status_code >= 500:
                 time.sleep(2 ** min(attempt, 5))
                 continue
-            if r.status_code == 400 and "tool_use_failed" in r.text:
+            if r.status_code == 400 and ("tool_use_failed" in r.text or "failed_generation" in r.text):
                 try:
                     gen = r.json()["error"].get("failed_generation", "")
                 except Exception:  # noqa: BLE001
