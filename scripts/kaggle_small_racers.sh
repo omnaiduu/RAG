@@ -8,6 +8,9 @@ RACERS=${RACERS:-C2,D,C1,A,CB}
 TAG=${TAG:-e2b}
 OUT=/kaggle/working/results
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# Kaggle's image ships TensorFlow/JAX; when a library imports them, XLA pre-grabs most of the GPU.
+export USE_TF=0 USE_JAX=0 USE_FLAX=0 TRANSFORMERS_NO_TF=1
+export XLA_PYTHON_CLIENT_PREALLOCATE=false XLA_PYTHON_CLIENT_ALLOCATOR=platform TF_FORCE_GPU_ALLOW_GROWTH=true
 mkdir -p $OUT
 nvidia-smi --query-gpu=name,memory.total --format=csv
 for g in 0 1; do
