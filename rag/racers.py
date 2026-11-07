@@ -80,10 +80,11 @@ class Base:
 
     def search(self, run: Run, tool: str, query: str, **kw) -> list[int]:
         t0 = time.time()
+        k = kw.get("k", K)
         if tool == "hybrid" and kw.get("exact_terms"):
-            idxs = self.tools.hybrid(query, K, exact_terms=kw["exact_terms"])
+            idxs = self.tools.hybrid(query, k, exact_terms=kw["exact_terms"])
         else:
-            idxs = self.tools.run(tool, query, K)
+            idxs = self.tools.run(tool, query, k)
         run.tool_seconds += time.time() - t0
         run.tool_calls += 1
         for i in idxs:
@@ -502,7 +503,9 @@ class RacerC1v3(RacerC1v2):
     name = "C1v3"
 
     def solve(self, question: str) -> Run:
-        run = super().solve(question)
+        return self._shape_fix(super().solve(question), question)
+
+    def _shape_fix(self, run: Run, question: str) -> Run:
         problem = answer_shape_problem(question, run.answer)
         if not problem:
             return run
@@ -520,4 +523,136 @@ class RacerC1v3(RacerC1v2):
         return run
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3}
+class RacerC1v4(RacerC1v3):
+    """C1 v3 plus four general changes, all aimed at the first lookup going wrong:
+
+    1. Backtrack: when a step that uses an earlier answer finds nothing, that earlier answer was probably wrong.
+       Redo the earlier step once, asking for a different answer, then retry the step.
+    2. Anchor: a step that names nothing from the question (no #1, no exact term) gets the question's names added
+       to its search, so "What film shares its universe with the novel?" still searches for the novel's title.
+    3. Facts first: the final form writes the facts it uses (and compares) before the answer.
+    4. Plan rules: every step names what it is about; the first step starts from the most specific clue.
+    """
+    name = "C1v4"
+
+    PLAN = (
+        "Break the question into the smallest lookup steps, in order (1 to 3 steps). Write each step as a short "
+        "question. If a step needs the answer of an earlier step, write #1 (or #2) in its place.\n"
+        "Rules: start from the most specific name or clue in the question. Every step must say what it is about: "
+        "copy the name from the question or use #1. Never write a vague step like \"that character\" or "
+        "\"the description\".\n"
+        'Example: "What is the capital of the country where Messi was born?" -> '
+        '{"steps": ["Where was Messi born?", "What is the capital of #1?"], "exact_terms": ["Messi"]}\n'
+        'Example: "According to the Inception article, who played the dream thief, and where was that actor born?" -> '
+        '{"steps": ["Who played the dream thief in Inception?", "Where was #1 born?"], "exact_terms": ["Inception"]}\n'
+        'Example: "Which is taller, the Eiffel Tower or Big Ben?" -> '
+        '{"steps": ["How tall is the Eiffel Tower?", "How tall is Big Ben?"], "exact_terms": ["Eiffel Tower", "Big Ben"]}\n'
+        "exact_terms: names or titles copied exactly from the question.\n"
+        "Reply with only JSON.\n\nQUESTION: {q}")
+
+    STEP4 = (
+        "Answer the sub-question using only the passages. Reply with only JSON:\n"
+        '{{"quote": "<copy the one sentence from the passages that contains the answer>", '
+        '"answer": "<shortest answer, copied word for word from that sentence>"}}\n'
+        'If the passages do not contain it, use "answer": "unknown".{note}\n\n'
+        "SUB-QUESTION: {q}\n\nPASSAGES:\n{p}")
+
+    FINAL = (
+        "Answer the question using the facts and passages. Reply with only JSON:\n"
+        '{{"quote": "<the sentence or fact the answer comes from>", '
+        '"reasoning": "<one short sentence: the facts you use; if the question compares, write both values>", '
+        '"answer": "<shortest possible answer: a name, date, number or few words>", "sources": ["<passage ids>"]}}\n'
+        'If the answer is not there, use "answer": "unknown".{note}\n\n'
+        "QUESTION: {q}\n\nFACTS FOUND:\n{f}\n\nPASSAGES:\n{p}")
+
+    def _step4(self, run: Run, n: int, q: str, question: str, exact: list[str], kept: list[int],
+               avoid: str = "") -> tuple[str, str, bool]:
+        note = (f'\nThe answer is not "{avoid}" (that led nowhere): give a different one that fits.' if avoid else "")
+        obj: dict = {}
+        for attempt in (0, 1):
+            query = q if attempt == 0 else f"{q} {question}"
+            idxs = self.search(run, "hybrid", query, exact_terms=exact or None, k=8 if avoid else 5)
+            kept += [i for i in idxs if i not in kept]
+            obj = self.ask_json(run, self.STEP4.format(q=q, p=self.tools.format(idxs, 140), note=note), max_new_tokens=160)
+            ans = str(obj.get("answer") or "unknown")
+            ok = self._grounded(ans, idxs) and not (avoid and _norm(ans) == _norm(avoid))
+            run.trace.append({"step": f"step{n + 1}", "attempt": attempt, "query": query, "avoid": avoid or None,
+                              "hits": [self.tools.chunks[i].id for i in idxs], "out": obj, "grounded": ok})
+            if ok:
+                return ans, str(obj.get("quote", "")), True
+            run.flags["ungrounded_step"] = run.flags.get("ungrounded_step", 0) + 1
+        return str(obj.get("answer") or "unknown"), str(obj.get("quote", "")), False
+
+    def _fill(self, n: int, step: str, question: str, answers: list[str], exact: list[str]) -> tuple[str, set[str]]:
+        """The step's search text with #k filled in, and the earlier answers it used."""
+        known = [a if a and not GIVE_UP.search(a) else "" for a in answers]
+        refs = [int(m) for m in re.findall(r"#(\d)", step)]
+        if any(not (0 < r <= len(known)) or not known[r - 1] for r in refs):
+            return question, set()
+        q = re.sub(r"#(\d)", lambda m: known[int(m.group(1)) - 1], step)
+        used = {known[r - 1] for r in refs}
+        if n > 0 and not refs and known and known[-1] and ANAPHOR.search(step):
+            q = f"{step} ({known[-1]})"
+            used.add(known[-1])
+        if not used and exact and not any(t.lower() in q.lower() for t in exact):
+            q = f"{q} ({'; '.join(exact)})"  # anchor a step that names nothing from the question
+        return q, used
+
+    def solve(self, question: str) -> Run:
+        run = Run()
+        plan = self.ask_json(run, self.PLAN.replace("{q}", question), max_new_tokens=200)
+        run.trace.append({"step": "plan", "out": plan})
+        steps = [str(s) for s in plan.get("steps", []) if isinstance(s, str) and s.strip()][: self.max_steps]
+        steps = steps or [question]
+        exact = [str(t) for t in plan.get("exact_terms", []) if isinstance(t, str) and t.strip()][:3]
+
+        answers: list[str] = []
+        queries: list[str] = []
+        quotes: list[str] = []
+        kept: list[int] = []
+        used_as_input: set[str] = set()
+        backtracked = False
+        n = 0
+        while n < len(steps):
+            q, used = self._fill(n, steps[n], question, answers, exact)
+            terms = [a for a in used if a and a.lower() in q.lower()] + [t for t in exact if t.lower() in q.lower()]
+            ans, quote, ok = self._step4(run, n, q, question, terms[:3], kept)
+            prev = n - 1
+            if not ok and used and not backtracked and prev >= 0 and answers[prev] in used:
+                # the earlier answer led nowhere: ask that step again for a different answer, then retry this one
+                backtracked = True
+                run.flags["backtrack"] = 1
+                pq, pused = self._fill(prev, steps[prev], question, answers[:prev], exact)
+                pterms = [t for t in exact if t.lower() in pq.lower()]
+                pans, pquote, pok = self._step4(run, prev, pq, question, pterms[:3], kept, avoid=answers[prev])
+                if pok:
+                    answers[prev], queries[prev], quotes[prev] = pans, pq, pquote
+                    continue  # redo step n with the new answer
+            used_as_input |= used
+            answers.append(ans); queries.append(q); quotes.append(quote)
+            n += 1
+
+        facts = [f"{q} -> {a}" + (f' (from: "{qt[:200]}")' if qt else "") for q, a, qt in zip(queries, answers, quotes)]
+        facts_txt = "\n".join(f"- {f}" for f in facts)
+        note = ""
+        for attempt in (0, 1):
+            obj = self.ask_json(run, self.FINAL.format(q=question, f=facts_txt, p=self.fmt(kept[-10:]), note=note),
+                                max_new_tokens=220)
+            ans = str(obj.get("answer") or "unknown")
+            run.trace.append({"step": "answer", "attempt": attempt, "out": obj})
+            if _norm(ans) in {_norm(a) for a in used_as_input} and attempt == 0:
+                run.flags["bridge_rejected"] = run.flags.get("bridge_rejected", 0) + 1
+                note = (f'\nNote: "{ans}" is only an intermediate fact (the answer to an earlier step), '
+                        "not what the question asks for.")
+                continue
+            if not self._grounded(ans, kept, facts_txt + " " + question) and attempt == 0:
+                run.flags["ungrounded_final"] = run.flags.get("ungrounded_final", 0) + 1
+                note = "\nNote: your last answer was not found in the facts or passages. Copy it from them."
+                continue
+            break
+        run.answer = ans
+        run.sources = [str(x) for x in obj.get("sources", []) if isinstance(x, (str, int))]
+        return self._shape_fix(run, question)
+
+
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4}

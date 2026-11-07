@@ -26,7 +26,8 @@ LABELS = {"A": "A: basic RAG", "B": "B: big agent", "C1": "C1: fixed steps", "C2
           "D": "D: free small agent", "CB": "closed book",
           "C2v1": "C2 v1 (guardrails logged, not enforced)", "Dv1": "D v1 (strict parser)",
           "C1v2": "C1 v2: steps + grounded answers",
-          "C1v3": "C1 v3: v2 + answer-shape check"}
+          "C1v3": "C1 v3: v2 + answer-shape check",
+          "C1v4": "C1 v4: v3 + backtrack, anchors, facts-first"}
 
 
 def label(racer: str) -> str:
