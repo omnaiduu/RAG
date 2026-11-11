@@ -118,7 +118,7 @@ What reduces (but does not remove) the concern:
 - **We rejected a dataset-specific fix:** having code compare birth years for "who was born earlier" questions would almost certainly have raised the score, but it is tied to this dataset's question template, so we left it out.
 - **The fixes transferred to a model they were not designed on.** They were designed from the 2B model's failures; the 4B model ran the same code unchanged and scored higher (Section 7).
 
-The fix for the caveat is a locked test set of fresh questions (Section 10).
+The fix for the caveat is a locked test set of fresh questions (Section 11). Section 10 discusses whether this approach counts as cheating.
 
 ---
 
@@ -317,7 +317,73 @@ This is a simulation on a small sample, not a measured system.
 
 ---
 
-## 10. Limitations and how to test fairly
+## 10. Discussion: is using a big model to optimise a small model's pipeline cheating?
+
+### What the approach is called
+There is no single standard name. Common ones:
+- **LLM-driven prompt / pipeline optimisation**, or **"LLM as optimiser"**: a stronger model improves a weaker model's prompts and workflow.
+- **Compound AI system optimisation**: the system is the model plus code, search and checks, and the whole thing is optimised, not just the model.
+- **"Compiling" a pipeline**: DSPy's term. A teacher model writes and selects the prompts and examples a student model's pipeline uses.
+- **"Scaffold distillation"**: our own descriptive term, not an established one. The big model's know-how ends up in the code and prompts around the small model instead of in its weights.
+
+Related work: DSPy, OPRO ("Large Language Models as Optimizers"), APE ("LLMs are human-level prompt engineers"), ADAS ("Automated Design of Agentic Systems").
+
+### An analogy
+A hospital can have its senior doctor see every patient: excellent, but expensive and slow. Or the senior doctor can study the common cases, write checklists, and let junior doctors follow them for routine patients, with unusual cases still going to the senior.
+
+| Analogy | This project |
+|---|---|
+| Senior doctor | Big model |
+| Junior doctors | Gemma 2B / 4B |
+| Checklist | The code steps, checks and prompts |
+| Unusual cases to the senior | Routing flagged answers to the 120B |
+
+### How the rules came from the mistakes
+Each rule was the big model turning a pattern in the small model's mistakes into a general check. The rules contain no answers, only how to avoid typical mistakes.
+
+| Mistake seen in the 2B's answers | Rule written into the code |
+|---|---|
+| Stopped half-way ("Argentina" instead of "Buenos Aires") | Split the question into linked steps; code passes step 1's answer into step 2 |
+| Made up answers not in the passage | The answer must appear in the passage, or search again |
+| Answer hidden in the last 50 words of a passage that were never shown | Show the whole 140-word passage |
+| Gave a date when asked "who was born earlier, X or Y?" | The answer must be yes/no or one of the named options |
+| Searches lost the main name ("the novel" instead of its title) | Keep the question's names in every search |
+
+### Is it cheating?
+**No.** Studying a system's mistakes and adjusting prompts, rules and code is ordinary error analysis and prompt engineering, which engineers have always done. Having a big AI do the analysis instead of a person changes the tool, not the nature of the work.
+
+It **becomes misleading** in four situations:
+
+1. **Tuning and testing on the same questions, then claiming it works on new ones.** This applies to us. Our scores are **development-set scores**, not test scores. That is honest as long as it is labelled that way, and a locked test set (Section 11) turns it into a real test.
+2. **Rules that leak answers**, e.g. "if the question mentions X, answer Y". We did not do this, and we rejected the one rule that leaned that way: code comparing birth years for "who was born earlier" questions.
+3. **Hiding the big model's role or cost.** Designing the pipeline took real big-model effort. It is a one-off cost, but it is part of the cost.
+4. **A lopsided comparison.** The small model's pipeline got many design rounds, while the 120B ran its default loop with no tuning. A fully fair comparison would give both the same design effort, and the 120B would probably improve too.
+
+These notes state 1, 3 and 4 openly.
+
+**Fine-tuning vs this approach.** Fine-tuning changes the model's weights; this approach changes only the code and prompts around the model. No weights were changed here. The accurate claim is not "the model learned the dataset" but "the pipeline around the model was adapted to the task".
+
+### Assessment
+
+**Strengths**
+- The expensive model is used where it adds the most value: understanding the problem once, not answering every question.
+- The result is cheap to run, private and inspectable. The know-how is plain code and prompts anyone can read and change.
+- It works with any small model. A better small model plugged into the same pipeline improved immediately (2B → 4B: 64.5% → 72%).
+
+**Weaknesses**
+- **Narrow.** The pipeline is good at the question types it was designed around; new types need another design round.
+- **Easy to overfit.** The designer sees the mistakes, so without a locked test set you cannot tell general fixes from memorised ones.
+- **The hardest reasoning still needs a big model.** On 3-hop questions the 120B still clearly wins (67% vs 46%).
+- **Diminishing returns.** Each round of fixes gained less than the one before: +6 points (v2 → v3), then +2.5 (v3 → v4). Past a point, a better small model or training helps more than more rules.
+
+**Verdict.** A sensible, practical approach, and for a fixed, high-volume task arguably the right one. Think of it as **engineering the system**, not making the model smarter. Its main risk is overfitting, not cheating, and the cure is simple: a locked test set and an honest description of what was tuned.
+
+### One-sentence summary for the blog
+*"I used a large AI as the engineer and a small AI as the worker. The large model studied the small model's mistakes and redesigned the pipeline around it, with no change to its weights, which brought a 4B model close to a 120B agent on this task. The scores are development-set scores, and testing on fresh questions is the next step."*
+
+---
+
+## 11. Limitations and how to test fairly
 
 | Limitation | Fix |
 |---|---|
@@ -332,7 +398,7 @@ This is a simulation on a small sample, not a measured system.
 
 ---
 
-## 11. Infrastructure notes and problems we hit
+## 12. Infrastructure notes and problems we hit
 
 - **Compute:**
   - Modal needed a payment method, so all GPU work ran on **Kaggle** (free, 2× T4 16 GB, ~30 GPU-hours/week).
@@ -353,7 +419,7 @@ This is a simulation on a small sample, not a measured system.
 
 ---
 
-## 12. Reproducing
+## 13. Reproducing
 
 Code is on branch `claude/gallant-hamilton-rgm4j1`.
 
