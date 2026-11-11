@@ -15,3 +15,8 @@ kaggle kernels output ommnaidu/rag-gpu-check -p out/  # fetch results
 Needs a Kaggle API token in `KAGGLE_API_TOKEN` or `~/.kaggle/access_token` (never commit it).
 
 `modal_jobs/` holds the same smoke test for [Modal](https://modal.com) (needs a payment method on the Modal account): `modal run modal_jobs/gpu_check.py`, or **Actions → Modal GPU check** on GitHub.
+
+## Results and write-up
+
+- [`docs/ENGINEERING_NOTES.md`](docs/ENGINEERING_NOTES.md): the full story (setup, every version, results, conclusions, limitations).
+- `results/summary.md`: all scores; `results/analysis.txt`: head-to-head, 2B vs 4B, routing (`python scripts/analyze.py`).

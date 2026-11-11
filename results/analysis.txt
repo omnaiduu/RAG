@@ -1,0 +1,32 @@
+## 1. Head-to-head on the 31 questions racer B has answered
+
+A            gemma-4-E2B-it     9/31 = 29.0%
+B            gpt-oss-120b      24/31 = 77.4%
+C1           gemma-4-E2B-it    18/31 = 58.1%
+C1@lance     gemma-4-E2B-it    19/31 = 61.3%
+C1v2@lance   gemma-4-E2B-it    18/31 = 58.1%
+C1v3@lance   gemma-4-E2B-it    21/31 = 67.7%
+C1v3@lance   gemma-4-E4B-it    23/31 = 74.2%
+C1v4@lance   gemma-4-E2B-it    22/31 = 71.0%
+C2           gemma-4-E2B-it    15/31 = 48.4%
+C2v2@lance   gemma-4-E2B-it    18/31 = 58.1%
+C2v2@lance   gemma-4-E4B-it    20/31 = 64.5%
+CB           gemma-4-E2B-it     3/31 = 9.7%
+D            gemma-4-E2B-it     6/31 = 19.4%
+
+## 2. C1 v3 with 2B vs 4B (identical code)
+
+4B fixes 31, 4B breaks 16, both right 113, both wrong 40; two-sided sign test p = 0.040
+  flag bridge_rejected           2B   14   4B    5
+  flag shape_retry               2B   13   4B    0
+  found every needed page        2B  140   4B  169
+  found first needed page        2B  175   4B  193
+  plans linking steps with #1    2B   30   4B  160
+  step answers 'unknown'         2B    2   4B   88
+
+## 3. Confidence flags and simulated routing (flagged -> 120B)
+
+2B C1 v4: no flag 162 q -> 69% right; flagged 38 q -> 61% right
+   on B's 31: small alone 22, routed 23 (sent 7 to the 120B), 120B alone 24
+4B C1 v3: no flag 139 q -> 78% right; flagged 61 q -> 59% right
+   on B's 31: small alone 23, routed 24 (sent 10 to the 120B), 120B alone 24
