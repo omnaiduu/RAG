@@ -72,6 +72,21 @@ The first version kept a BM25 index (`bm25s`), a numpy embedding matrix and a Py
 ### Is all this searching heavy on the database?
 No. Per question (4B model, C1 v3): **2.7 searches, 1.9 s of search time, 96 s of LLM time**. Search is about 2% of the time, and most of it is the cross-encoder reranker running on CPU. The lookups themselves use indexes and take milliseconds to a few hundred milliseconds at 64K chunks. At larger scale you would add an ANN vector index (IVF/HNSW) and run the reranker on a GPU. **The cost is the language model, not the database.**
 
+### Design takeaway: always run every search method together; don't make the model choose
+Since search is cheap and the model is expensive, every search should run **all methods together**: keyword (BM25), exact phrase, and vector, fused with RRF, then reranked. Making the model pick one method at a time (as racers C2 and D do) costs accuracy and saves almost nothing.
+
+**Evidence from this project:**
+- **The small agent picked badly.** C2's most used tool was BM25 (176 calls), the weakest first tool: 40% eventual accuracy, against 49% when starting with hybrid.
+- **Telling it to use hybrid helped the comparisons.** In C2 v2, the advice "hybrid by default" made hybrid the first tool in 191 of 200 questions, and comparisons rose from 60% to 95%.
+- **The best racers never choose.** C1 calls `hybrid` on every step, and it scored highest.
+- **The combined search costs little.** Search, reranker included, takes 1–2 s per question, against 24–96 s of model time. Running every method is effectively free.
+- **The methods cover each other's blind spots:**
+  - Exact phrase finds rare names, titles and numbers that vectors blur.
+  - Vectors find paraphrases that keywords miss.
+  - The reranker reads the merged candidates and keeps the truly relevant ones.
+
+**Recommendation for a real app:** expose **one search call** that always runs keyword + phrase + vector, fused with RRF, then reranked. Let the model (or the code) decide only *what to search for*, never *how*. One database that serves all three kinds of query in one request, as LanceDB does here, makes this simple.
+
 ---
 
 ## 4. The racers
