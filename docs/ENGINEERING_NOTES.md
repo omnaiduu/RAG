@@ -133,7 +133,7 @@ What reduces (but does not remove) the concern:
 - **We rejected a dataset-specific fix:** having code compare birth years for "who was born earlier" questions would almost certainly have raised the score, but it is tied to this dataset's question template, so we left it out.
 - **The fixes transferred to a model they were not designed on.** They were designed from the 2B model's failures; the 4B model ran the same code unchanged and scored higher (Section 7).
 
-The fix for the caveat is a locked test set of fresh questions (Section 11). Section 10 discusses whether this approach counts as cheating.
+**This was then tested.** On 60 fresh, locked questions the tuned versions kept their scores (2B 67%, 4B 75%), so the tuning was not fitted to the old questions (Section 8, "Fresh held-out test"). Section 10 discusses whether this approach counts as cheating.
 
 ---
 
@@ -301,6 +301,38 @@ The 2B's flags barely separate good from bad answers; the 4B's do. Simulated on 
 
 This is a simulation on a small sample, not a measured system.
 
+### Fresh held-out test: the honest check (`results/fresh_test.md`)
+
+The worry: the pipeline was improved by looking at mistakes on the same 200 questions it was scored on, so its scores could be inflated. To check:
+
+1. **60 new questions** were made with the same recipe (`data_build/make_fresh.py`, seed 1). They use only articles that no old question, and no old candidate question, touched: zero overlap. The mix matches the original (33 two-step, 15 three-step, 12 comparison). Questions a model could answer from memory were removed.
+2. **The question file was committed before any system ran on it** (commit `42ecd2b`, sha256 `5f0a388f…`). The scoring script was also committed before any results existed.
+3. **Every setup ran once, with no changes.** Nothing was tuned on these questions.
+
+We also checked that **no correct answer appears anywhere in the prompts or code**: all 200 old answers were searched for and none was found. The model receives only the question text (`rag/run.py`); the correct answer is attached afterwards, for marking only.
+
+| Setup | Tuned on old questions? | Old questions | **Fresh questions** |
+|---|---|---|---|
+| No search, memory only (2B) | no | 2% | **2%** |
+| Search once, then answer (2B) | no | 32% | **42%** |
+| Step-by-step plan run by code, first version (2B) | no | 61% | **62%** |
+| Step-by-step plan + answer-shape rule (2B) | yes | 64% | **67%** |
+| Step-by-step plan + answer-shape rule + retry (2B) | yes | 67% | **67%** |
+| Step-by-step plan run by code, first version (4B) | no | not run | **67%** |
+| Step-by-step plan + answer-shape rule (4B) | yes | 72% | **75%** |
+| Model searches on its own, with checks (4B) | yes | 66% | **72%** |
+| Big 120B model searches on its own | no | 77% (31 q) | **63%** (52 of 60; Groq's daily limit stopped it) |
+
+With 60 questions, each score is uncertain by about ±12 points.
+
+**What it shows**
+- **The tuned versions did not fall back on new questions.** If the rules had been fitted to the old 200 questions, they would have dropped toward the untuned version's level. They held instead: 2B 67% → 67%, 4B 72% → 75%. The rules are general.
+- **The tuning gain is small and not statistically certain:** +3 points on the 2B (+7 fixed / −4 broken, p = 0.55) and +5 on the 4B (+10 / −5, p = 0.30). The **step-by-step structure itself** is the big gain: 42% for "search once" vs 62% for the untuned step-by-step version on the same 2B.
+- **The small models matched or beat the 120B agent here.** On the 52 questions both answered: 4B tuned 40, 4B untuned 35, 2B tuned 37, 120B 33. None of these gaps is statistically certain (4B tuned vs 120B: p = 0.12).
+- **Why the 120B dropped:** 16 of its 19 misses were "unknown". It gave up after about 2 searches (on the old 31 questions, only 4 were "unknown"). That is a weakness of the simple agent loop we gave it, which was never tuned. A better prompt or more search budget would probably lift it. So the accurate claim is "the small model with code matched our 120B agent", not "the small model beats the 120B model".
+- **Three-step questions:** on this set the 120B got 7/14 and the 4B 9/15. The earlier finding that "the 120B is clearly better at three steps" did not repeat.
+- **Grading is strict:** "Chișinău" for "Chișinău, Moldova" and "Monterrey" for "Monterrey, Nuevo León" count as wrong. This affects every setup alike.
+
 ---
 
 ## 9. Conclusions
@@ -313,13 +345,13 @@ This is a simulation on a small sample, not a measured system.
 5. **Search is cheap; the language model is the cost.** Search is about 2% of time per question.
 
 ### Promising (small sample)
-6. **4B + code control is in the same range as a 120B agent**: 23 vs 24 of 31 questions.
+6. **Small model + code control is in the same range as a 120B agent.** Old set: 23 vs 24 of 31. Fresh locked set: 4B 40, 2B 37, 120B 33 of 52. The 120B's simple agent loop often gave up, and it was never tuned.
 7. **Routing can cut big-model use**: it matched the 120B while sending about a third of the questions to it (simulated, 31 questions).
 
 ### Not shown
 - **Cheaper.** Run one question at a time on a T4 (and in slow 8-bit for the 4B), the small models cost *more* per question than the 120B on Groq, which batches many users. A batched server (e.g. vLLM) is needed to measure real serving cost.
 - **Generality.** One kind of document (new Wikipedia articles) and three question shapes. The 120B's loop handles any question; C1's fixed steps only handle what the code anticipates.
-- **3-hop questions**: the big model is still clearly better (67% vs 46% for the 4B).
+- **3-hop questions**: on the old set the big model was clearly better (67% vs 46% for the 4B), but on the fresh set it wasn't (120B 7/14, 4B 9/15). Not settled.
 
 ### Why use a small model with code at all?
 - **The big model is paid once, at design time**, not for every question.
@@ -369,7 +401,7 @@ Each rule was the big model turning a pattern in the small model's mistakes into
 
 It **becomes misleading** in four situations:
 
-1. **Tuning and testing on the same questions, then claiming it works on new ones.** This applies to us. Our scores are **development-set scores**, not test scores. That is honest as long as it is labelled that way, and a locked test set (Section 11) turns it into a real test.
+1. **Tuning and testing on the same questions, then claiming it works on new ones.** This applied to us at first: the 200-question scores are **development-set scores**. We then ran a locked set of 60 fresh questions, and the tuned versions held their scores (Section 8), so the claim now rests on a real test.
 2. **Rules that leak answers**, e.g. "if the question mentions X, answer Y". We did not do this, and we rejected the one rule that leaned that way: code comparing birth years for "who was born earlier" questions.
 3. **Hiding the big model's role or cost.** Designing the pipeline took real big-model effort. It is a one-off cost, but it is part of the cost.
 4. **A lopsided comparison.** The small model's pipeline got many design rounds, while the 120B ran its default loop with no tuning. A fully fair comparison would give both the same design effort, and the 120B would probably improve too.
@@ -388,13 +420,13 @@ These notes state 1, 3 and 4 openly.
 **Weaknesses**
 - **Narrow.** The pipeline is good at the question types it was designed around; new types need another design round.
 - **Easy to overfit.** The designer sees the mistakes, so without a locked test set you cannot tell general fixes from memorised ones.
-- **The hardest reasoning still needs a big model.** On 3-hop questions the 120B still clearly wins (67% vs 46%).
+- **The hardest reasoning may still need a big model.** On 3-hop questions the 120B won on the old set (67% vs 46%) but not on the fresh set, so this is unclear.
 - **Diminishing returns.** Each round of fixes gained less than the one before: +6 points (v2 → v3), then +2.5 (v3 → v4). Past a point, a better small model or training helps more than more rules.
 
 **Verdict.** A sensible, practical approach, and for a fixed, high-volume task arguably the right one. Think of it as **engineering the system**, not making the model smarter. Its main risk is overfitting, not cheating, and the cure is simple: a locked test set and an honest description of what was tuned.
 
 ### One-sentence summary for the blog
-*"I used a large AI as the engineer and a small AI as the worker. The large model studied the small model's mistakes and redesigned the pipeline around it, with no change to its weights, which brought a 4B model close to a 120B agent on this task. The scores are development-set scores, and testing on fresh questions is the next step."*
+*"I used a large AI as the engineer and a small AI as the worker. The large model studied the small model's mistakes and redesigned the pipeline around it, with no change to its weights, On 60 fresh questions nobody had looked at, the 4B scored 75% and the 2B 67%, against 63% for a 120B agent."*
 
 ---
 
@@ -402,8 +434,9 @@ These notes state 1, 3 and 4 openly.
 
 | Limitation | Fix |
 |---|---|
-| Pipeline improved on the same 200 questions it is scored on | ~80 fresh questions from unused articles: 20 practice / 60 locked test, each system run once |
-| Big model only on 31 questions | Run B on the locked 60 (Groq free tier: ~30–45 questions/day at ~4,200 tokens/question) |
+| Pipeline improved on the same 200 questions it is scored on | **Done:** 60 fresh locked questions; the tuned versions held their scores (Section 8) |
+| Big model only on 31 questions | **Mostly done:** 52 of 60 fresh questions (Groq daily limit). Finish the last 8 |
+| The 120B's agent loop was never tuned and gives up early | Give it the same design effort (better prompt, larger search budget) before claiming the small model beats it |
 | 4B and 120B not checked closed-book | Run both with no search on the locked set; set aside questions they answer from memory |
 | Automatic answer matching unchecked | Hand-check a random 30–50 answers |
 | Unbatched serving makes small models look expensive | One vLLM batched run on a T4 to measure real cost per 1K questions |
