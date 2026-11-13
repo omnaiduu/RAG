@@ -677,7 +677,9 @@ Reading the step-by-step traces of E4B v5's wrong answers (full examples in `doc
 
 The trace flags showed why. "Name, not description" used a loose test ("5+ words or starts with an article") and fired on **58 of 200 questions**, 42 of them already correct. It was involved in **7 of the 8 breaks**: "Kohei Fujimura" became "Fujimura", and correct dates were swapped for other dates. The "shorter form" retry did what it should; it was part of 2 of the 6 fixes.
 
-**v6b** keeps all four fixes but makes the name check strict: only answers starting with "a"/"an" (e.g. "a café that …") are re-asked. *(Result: see below when available.)*
+**v6b** keeps all four fixes but makes the name check strict: only answers starting with "a"/"an" (e.g. "a café that …") are re-asked. **Result: 149/200**, against v5's 150 and v6's 148. Compared with v5 it fixes 5 questions (q007, q050, q064, q115, q198) and breaks 6 (q060, q074, q100, q110, q113, q167); sign test p = 1.0, so no real difference. The strict name check fired only 7 times (v6: 58), and the shorter-form retry 19 times; the fixes are now harmless but also not helping overall. Speed unchanged (200 questions in 298 s on one A10, 40 answers/min).
+
+**Decision:** keep **v5** as the best setup. The v6 fixes repair the specific traces they were written for, but on 200 questions they trade one set of right answers for another. This is the point where tuning on this question set stops: further gains need a different test (easy one-lookup questions, real documents) rather than more rules.
 
 **Lesson.** A check that fires on 30% of questions to fix a problem seen in 2% of them does more harm than good. Every rule should log when it fires, and be judged on both what it fixes and what it breaks.
 
