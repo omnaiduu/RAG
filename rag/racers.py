@@ -655,6 +655,50 @@ class RacerC1v4(RacerC1v3):
         return self._shape_fix(run, question)
 
 
+class RacerC1v5(RacerC1v4):
+    """C1 v4 plus "read wider": when a step's answer is missing or not in the passages, the retry shows the
+    passages just before and after the best hits (same article), together with a wider search, instead of
+    only a wider search. Aimed at a general failure: the right article was found but the answer sat in a
+    neighbouring passage. Designed from failures on the original 200 questions; nothing benchmark-specific."""
+    name = "C1v5"
+
+    def _neighbours(self, idxs: list[int], top: int = 3) -> list[int]:
+        out: list[int] = []
+        n = len(self.tools.chunks)
+        for i in idxs[:top]:
+            for j in (i - 1, i, i + 1):
+                if 0 <= j < n and self.tools.chunks[j].title == self.tools.chunks[i].title and j not in out:
+                    out.append(j)
+        return out
+
+    def _step4(self, run: Run, n: int, q: str, question: str, exact: list[str], kept: list[int],
+               avoid: str = "") -> tuple[str, str, bool]:
+        note = (f'\nThe answer is not "{avoid}" (that led nowhere): give a different one that fits.' if avoid else "")
+        obj: dict = {}
+        first: list[int] = []
+        for attempt in (0, 1):
+            if attempt == 0:
+                query = q
+                idxs = self.search(run, "hybrid", query, exact_terms=exact or None, k=8 if avoid else 5)
+                first = idxs
+            else:  # read wider: neighbours of the best first-round hits + top hits of a wider search
+                query = f"{q} {question}"
+                wide = self.search(run, "hybrid", query, exact_terms=exact or None, k=5)
+                idxs = self._neighbours(first)
+                idxs += [i for i in wide if i not in idxs][: max(0, 10 - len(idxs))]
+                run.flags["read_wider"] = run.flags.get("read_wider", 0) + 1
+            kept += [i for i in idxs if i not in kept]
+            obj = self.ask_json(run, self.STEP4.format(q=q, p=self.tools.format(idxs, 140), note=note), max_new_tokens=160)
+            ans = str(obj.get("answer") or "unknown")
+            ok = self._grounded(ans, idxs) and not (avoid and _norm(ans) == _norm(avoid))
+            run.trace.append({"step": f"step{n + 1}", "attempt": attempt, "query": query, "avoid": avoid or None,
+                              "hits": [self.tools.chunks[i].id for i in idxs], "out": obj, "grounded": ok})
+            if ok:
+                return ans, str(obj.get("quote", "")), True
+            run.flags["ungrounded_step"] = run.flags.get("ungrounded_step", 0) + 1
+        return str(obj.get("answer") or "unknown"), str(obj.get("quote", "")), False
+
+
 class RacerC2v2(RacerC2):
     """C2 with the general checks that helped C1. The model still picks the tool and query every turn.
 
@@ -767,4 +811,4 @@ class RacerC2v2(RacerC2):
         return run
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C2v2": RacerC2v2}
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C2v2": RacerC2v2}

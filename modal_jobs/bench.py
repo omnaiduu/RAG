@@ -28,6 +28,7 @@ image = (
     .add_local_file(ROOT / "data/corpus.jsonl.gz", "/app/data/corpus.jsonl.gz")
     .add_local_file(ROOT / "data/emb_bge_small_f16.npy", "/app/data/emb_bge_small_f16.npy")
     .add_local_file(ROOT / "data/fresh/questions.jsonl", "/app/data/fresh/questions.jsonl")
+    .add_local_file(ROOT / "data/questions.jsonl", "/app/data/questions.jsonl")
 )
 hf_cache = modal.Volume.from_name("rag-hf-cache", create_if_missing=True)
 app = modal.App("rag-bench", image=image)
@@ -35,7 +36,7 @@ app = modal.App("rag-bench", image=image)
 
 @app.function(gpu=GPU, timeout=5400, volumes={"/root/.cache/huggingface": hf_cache}, cpu=16, memory=32768)
 def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
-          concurrency: int = 60) -> dict:
+          concurrency: int = 60, questions_file: str = "data/fresh/questions.jsonl") -> dict:
     import subprocess
     import sys
     import threading
@@ -107,7 +108,7 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
 
     llm = LocalLLM()
     shared_tools = Locked(tools)
-    questions = [json.loads(l) for l in open("data/fresh/questions.jsonl")]
+    questions = [json.loads(l) for l in open(questions_file)]
 
     def metric(name: str) -> float:
         txt = requests.get("http://127.0.0.1:8000/metrics", timeout=10).text
@@ -162,9 +163,10 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
 
 @app.local_entrypoint()
 def main(model: str, tag: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
-         concurrency: int = 60):
-    out = bench.remote(model, racer, max_len, mem_util, concurrency)
-    raw = ROOT / f"results/raw/vllm-{tag}-fresh.jsonl"
+         concurrency: int = 60, questions: str = "fresh"):
+    qfile = "data/fresh/questions.jsonl" if questions == "fresh" else "data/questions.jsonl"
+    out = bench.remote(model, racer, max_len, mem_util, concurrency, qfile)
+    raw = ROOT / f"results/raw/vllm-{tag}-{questions}.jsonl"
     raw.parent.mkdir(parents=True, exist_ok=True)
     with open(raw, "w") as f:
         for r in out["records"]:
