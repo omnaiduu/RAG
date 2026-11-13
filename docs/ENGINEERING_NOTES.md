@@ -565,5 +565,30 @@ To save credits, only the necessary runs:
 - **One more host:** jobs then also needed `input-plane.us-east.modal.com`, which was added to the environment's allowed hosts.
 - **First job failure:** vLLM's FlashInfer sampler tried to compile CUDA code at start-up (`Could not find nvcc`) in a slim image. Fixed with `VLLM_USE_FLASHINFER_SAMPLER=0`; the sampler is not needed for greedy decoding.
 
-### Results
-*(filled in when the runs finish)*
+### Results (one A10 24 GB GPU, all 60 fresh questions sent at once, vLLM)
+
+| Model | Method | Accuracy | Full-length users that fit at once* | Time for 60 | $ per 1K answers (GPU + 16 CPU) | GPU only |
+|---|---|---|---|---|---|---|
+| E4B 4-bit | step-by-step code | 41/60 (68%) | **~27** | 134 s | $1.31 | $0.68 |
+| E4B 4-bit | loop (searches on its own, with checks) | 38/60 (63%) | **~27** | 112 s | $1.09 | $0.57 |
+| E4B full precision | step-by-step code | 43/60 (72%) | ~13 | 158 s | $1.54 | $0.80 |
+| **26B-A4B 4-bit** | step-by-step code | **47/60 (78%)** | ~1 | 146 s | $1.42 | $0.74 |
+| **26B-A4B 4-bit** | **loop** | **47/60 (78%)** | ~1 | 109 s | $1.07 | $0.56 |
+| *(earlier)* E4B 8-bit, HF, Kaggle T4, one at a time | step-by-step code | 45/60 (75%) | — | — | ~$9 | — |
+| *(earlier)* gpt-oss-120b via Groq API | its own loop | 33/52 (63%) | — | — | ~$0.73 | — |
+
+\* vLLM's own estimate: KV-cache room ÷ 6,144 tokens per request. Our requests are much shorter (~1–2K tokens), so more fit in practice, but the ratio between models holds.
+
+Prices are Modal list prices (A10 $0.000306/s, CPU $0.0000131/core/s, memory $0.00000222/GiB/s). The 16 CPU cores run search and are about half the bill; a deployment would size them to need. Cost per 1K is measured at a light load (60 at once); at heavier load the model with the most free memory pulls ahead.
+
+**What it shows**
+1. **The smarter MoE model is the most accurate: 26B-A4B gets 78%, with code or loop.** It does about the same work per word as E4B, so it runs at the same speed.
+2. **But on a 24 GB GPU it has almost no room for users.** Its 4-bit weights are ~17 GB and it needs more memory per user (more layers), so vLLM estimates about 1 full-length conversation at once vs ~27 for E4B 4-bit. It only kept up here because our requests are short. For real multi-user load it needs a 48 GB+ GPU.
+3. **With a smart enough model, the loop catches up with the code.** At 2B the loop was 20 points behind; at 4B, 3–5 points; at 26B-A4B, equal (47 vs 47), and the loop used fewer tokens and finished faster. The loop is more general, since it is not limited to question shapes the code anticipated.
+4. **4-bit compression cost E4B little:** 41 vs 43 out of 60, within noise, for about twice the room for users (27 vs 13).
+5. **Serving through vLLM changes the numbers.** E4B's 4-bit vLLM score (68%) is below its earlier 8-bit HF score (75%) on the same questions. Part is compression and part is numerical differences in a different engine; with 60 questions, ±12 points is normal wobble.
+6. **Cost:** every setup lands at about $0.55–0.80 per 1,000 answers in GPU time at this light load, about the same as the 120B through Groq. The real saving appears only under heavy load, which is the next (and last) measurement.
+
+**Spend so far on Modal:** about $2.
+
+**Recommended next step (one run):** take the two leaders, E4B 4-bit (most users) and 26B-A4B (most accurate), and load each with about 4× more simultaneous requests: E4B on the A10, 26B-A4B on a 48 GB L40S so it has room. That measures real cost per 1,000 answers at full load.
