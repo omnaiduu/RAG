@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .uv_pip_install("vllm==0.33.0", "bm25s", "lancedb==0.41.0", "sentence-transformers", "requests", "pyarrow")
-    .env({"HF_HUB_ENABLE_HF_TRANSFER": "0", "TOKENIZERS_PARALLELISM": "false"})
+    .env({"HF_HUB_ENABLE_HF_TRANSFER": "0", "TOKENIZERS_PARALLELISM": "false", "VLLM_USE_FLASHINFER_SAMPLER": "0"})
     .add_local_dir(ROOT / "rag", "/app/rag", ignore=["__pycache__"])
     .add_local_file(ROOT / "data/corpus.jsonl.gz", "/app/data/corpus.jsonl.gz")
     .add_local_file(ROOT / "data/emb_bge_small_f16.npy", "/app/data/emb_bge_small_f16.npy")

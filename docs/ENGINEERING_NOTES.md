@@ -505,3 +505,65 @@ Raw outputs, with every step, query, passage id and model output, are in `result
 | C1 v4 | `RacerC1v4` |
 | C2 | `RacerC2` |
 | C2 v2 | `RacerC2v2` |
+
+---
+
+## 14. Serving on one GPU: which model gives the most users per dollar?
+
+### The goal (owner's words, paraphrased)
+Serve as many users as possible, at the lowest cost, with the best accuracy, on one GPU. The step-by-step code is what lets a small model do the job (Section 8, fresh test), so every test here uses it. The open question is **which model to put inside it**.
+
+### Background we had to get straight: two sizes per model
+Every model has two different "sizes", and they control different things:
+
+| | What it is | What it controls |
+|---|---|---|
+| **Stored size** (total parameters) | everything that must sit in GPU memory | which GPU you need, and how much room is left for users |
+| **Working size** (active parameters) | what actually computes for each word | speed, i.e. throughput and cost |
+
+Stored size also roughly tracks how much the model *knows*.
+
+| Model | Stored | Working | Why |
+|---|---|---|---|
+| Normal ("dense") 8B | 8B | 8B | every parameter works on every word |
+| Gemma 4 E4B | ~8B | ~4B | "E" = effective; most of the extra is per-layer lookup tables |
+| gpt-oss-120b | 117B | ~5B | mixture of experts: each word goes to a few of many "experts" |
+| Gemma 4 26B-A4B | 26B | ~4B | mixture of experts, the Gemma version |
+
+**Per-layer embeddings (PLE), the trick inside Gemma's E models.** A normal model has one embedding table at the input: one row of numbers per token, about 262,000 rows. Gemma's E models add a small extra table for **every layer**. Stored, that is billions of numbers. Per word, only one small row per layer is fetched, with almost no maths. On a phone the tables stay in normal RAM and only the ~4B "brain" sits on the chip (about 3 GB): a small desk, with the big encyclopedias kept on the shelf. On a server GPU, the standard loader puts everything on the GPU, so **E4B uses about the memory of an 8B but does about the work of a 4B**.
+
+**Mixture of experts (MoE).** Like a hospital with 128 specialists where each patient sees only 4. The building is huge (all experts must be stored), but each visit is cheap. That is why gpt-oss-120b is cheap per token on an API: it works like a ~5B per word but needs an 80 GB GPU to hold it. So "4B vs 120B" was closer to "4B vs 5B" in work per word. The 120B's edge is stored knowledge, and in RAG the search supplies most of the knowledge.
+
+**A lesson about our own earlier numbers.** On Kaggle's 16 GB T4 the E4B only fitted in 8-bit (bitsandbytes), which unpacks weights on every step and is slow. So the earlier E4B cost estimate (~$9 per 1,000 questions, unbatched, 8-bit) was pessimistic for two reasons: no batching, and a slow 8-bit path.
+
+**How throughput works on one GPU.** Throughput ≈ speed per user × users at once.
+- **Speed per user:** set by the working size.
+- **Users at once:** set by the memory left after the weights, which holds each conversation's scratch memory (the KV cache).
+- **Rule of thumb:** memory decides what fits, working size decides speed, stored size (plus training) roughly decides smarts. That is why MoE models are often the sweet spot for one GPU.
+
+### What we decided to test, and what we skipped
+To save credits, only the necessary runs:
+
+| Run | Why |
+|---|---|
+| **Gemma 4 E4B, 4-bit (Google's QAT w4a16)** + step-by-step code | current best (75% on fresh); need its real batched speed and cost |
+| **Gemma 4 26B-A4B, 4-bit (QAT AWQ INT4)** + step-by-step code | same ~4B working size, ~3× the stored knowledge: could raise accuracy at about the same speed |
+
+**Skipped, with reasons:**
+- **Gemma 4 12B (dense):** about 3× slower per word than both; the 26B-A4B is the better bet for "more accuracy, same GPU".
+- **"Model searches on its own" runs:** already lost to the code approach.
+- **31B:** too slow and costly for the goal.
+- **Prompt tuning:** only after we know which model wins, and then tuned on the old 200 questions and checked on fresh ones.
+
+**Setup.** Both models run on one Modal L4 (24 GB), served by vLLM, with all 60 fresh questions sent at once (60 simultaneous "users"). Search runs in the same container. The fresh questions were frozen before any of this.
+
+**Recorded per model:** accuracy, answers per minute, p50 and max latency, tokens per second, peak GPU memory, vLLM's estimate of how many requests fit at once, and cost per 1,000 answers.
+
+### Making Modal work from the cloud sandbox
+- **Problem:** Modal's client talks gRPC (HTTP/2) to `api.modal.com`, and the sandbox's HTTPS proxy refused it ("Could not connect to the Modal server").
+- **Fix:** a web search found that the official Modal client gained HTTP-proxy support in mid-2026, as an optional extra. `pip install "modal[api-proxy-support]"` makes it tunnel through the standard `HTTPS_PROXY`.
+- **One more host:** jobs then also needed `input-plane.us-east.modal.com`, which was added to the environment's allowed hosts.
+- **First job failure:** vLLM's FlashInfer sampler tried to compile CUDA code at start-up (`Could not find nvcc`) in a slim image. Fixed with `VLLM_USE_FLASHINFER_SAMPLER=0`; the sampler is not needed for greedy decoding.
+
+### Results
+*(filled in when the runs finish)*
