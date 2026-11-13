@@ -1016,4 +1016,20 @@ class RacerC1v7(RacerC1v5):
         "QUESTION: {q}\n\nFACTS FOUND:\n{f}\n\nPASSAGES:\n{p}")
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C1v6b": RacerC1v6b, "C1v7": RacerC1v7, "C2v2": RacerC2v2}
+
+class RacerQ(RacerC1v5):
+    """Quick path for direct questions: one hybrid search (+ reranker), one answer form with a quote, one grounding
+    check. 2 model calls at most (the answer, plus one retry with neighbouring passages if the answer is not in the
+    passages). Flags "quick_unsure" when the final answer is unknown or not found in the passages."""
+    name = "Q"
+
+    def solve(self, question: str) -> Run:
+        run = Run()
+        ans, quote, ok = self._step4(run, 0, question, question, [], [])
+        run.answer = ans
+        if not ok or GIVE_UP.search(ans) or _norm(ans) in {"", "unknown"}:
+            run.flags["quick_unsure"] = 1
+        return self._shape_fix(run, question)
+
+
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C1v6b": RacerC1v6b, "C1v7": RacerC1v7, "Q": RacerQ, "C2v2": RacerC2v2}

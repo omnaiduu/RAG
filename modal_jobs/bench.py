@@ -29,6 +29,7 @@ image = (
     .add_local_file(ROOT / "data/emb_bge_small_f16.npy", "/app/data/emb_bge_small_f16.npy")
     .add_local_file(ROOT / "data/fresh/questions.jsonl", "/app/data/fresh/questions.jsonl")
     .add_local_file(ROOT / "data/questions.jsonl", "/app/data/questions.jsonl")
+    .add_local_dir(ROOT / "data/exam", "/app/data/exam", ignore=["candidates.jsonl", "closed_book_filter.jsonl"])
 )
 hf_cache = modal.Volume.from_name("rag-hf-cache", create_if_missing=True)
 app = modal.App("rag-bench", image=image)
@@ -38,7 +39,7 @@ app = modal.App("rag-bench", image=image)
 def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
           concurrency: int = 60, questions_file: str = "data/fresh/questions.jsonl",
           rerank: str = "BAAI/bge-reranker-base", show_k: int = 0, search_device: str = "cpu",
-          think: bool = False, think_budget: int = 1024) -> dict:
+          think: bool = False, think_budget: int = 1024, limit: int = 0) -> dict:
     import re
     import subprocess
     import sys
@@ -136,6 +137,8 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
     llm = LocalLLM()
     shared_tools = Locked(tools)
     questions = [json.loads(l) for l in open(questions_file)]
+    if limit:
+        questions = questions[:limit]
 
     def metric(name: str) -> float:
         txt = requests.get("http://127.0.0.1:8000/metrics", timeout=10).text
@@ -178,7 +181,7 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
         "model": model, "racer": racer, "rerank": rerank, "show_k": show_k, "search_device": search_device, "think": think, "gpu": gpu_name, "questions": len(records), "concurrency": concurrency,
         "startup_s": round(t_ready - t_start, 1), "wall_s": round(wall, 1),
         "answers_per_min": round(60 * len(records) / wall, 2),
-        "latency_p50_s": lat[len(lat) // 2], "latency_max_s": lat[-1],
+        "latency_p50_s": lat[len(lat) // 2], "latency_p90_s": lat[int(len(lat) * 0.9)], "latency_max_s": lat[-1],
         "prompt_tokens": int(prompt), "generated_tokens": int(gen),
         "gen_tokens_per_s": round(gen / wall, 1), "peak_gpu_mem_mb": peak["mb"],
         "errors": sum(bool(r["flags"].get("error")) for r in records),
@@ -191,10 +194,10 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
 @app.local_entrypoint()
 def main(model: str, tag: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
          concurrency: int = 60, questions: str = "fresh", rerank: str = "BAAI/bge-reranker-base", show_k: int = 0,
-         search_device: str = "cpu", think: bool = False, think_budget: int = 1024):
-    qfile = "data/fresh/questions.jsonl" if questions == "fresh" else "data/questions.jsonl"
+         search_device: str = "cpu", think: bool = False, think_budget: int = 1024, limit: int = 0):
+    qfile = {"fresh": "data/fresh/questions.jsonl", "old": "data/questions.jsonl", "exam": "data/exam/questions.jsonl"}[questions]
     out = bench.remote(model, racer, max_len, mem_util, concurrency, qfile, rerank, show_k, search_device, think,
-                       think_budget)
+                       think_budget, limit)
     raw = ROOT / f"results/raw/vllm-{tag}-{questions}.jsonl"
     raw.parent.mkdir(parents=True, exist_ok=True)
     with open(raw, "w") as f:
