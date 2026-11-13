@@ -1,0 +1,23 @@
+{
+  "model": "google/gemma-4-E4B-it",
+  "racer": "C1v3",
+  "gpu": "NVIDIA A10, 23028 MiB",
+  "questions": 60,
+  "concurrency": 60,
+  "startup_s": 258.2,
+  "wall_s": 157.7,
+  "answers_per_min": 22.83,
+  "latency_p50_s": 124.84,
+  "latency_max_s": 157.66,
+  "prompt_tokens": 269166,
+  "generated_tokens": 20784,
+  "gen_tokens_per_s": 131.8,
+  "peak_gpu_mem_mb": 20757,
+  "errors": 0,
+  "vllm_kv_log": [
+    "(EngineCore pid=177) INFO 11-13 07:27:48 [utils.py:381] Using LBNHC KV cache layout.",
+    "(EngineCore pid=177) INFO 11-13 07:29:19 [gpu_worker.py:772] Available KV cache memory: 3.44 GiB",
+    "(EngineCore pid=177) INFO 11-13 07:29:19 [gpu_worker.py:787] CUDA graph memory profiling is enabled (default since v0.21.0). The current --gpu-memory-utilization=0.9000 is equivalent to --gpu-memory-utilization=0.8740 without CUDA graph memory profiling. To maintain the same effective KV cache size as before, increase --gpu-memory-utilization to 0.9260. To disable, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0.",
+    "(EngineCore pid=177) INFO 11-13 07:29:19 [kv_cache_utils.py:1147] GPU KV cache size: 77,955 tokens, Maximum concurrency for 6,144 tokens per request: 12.69x"
+  ]
+}
