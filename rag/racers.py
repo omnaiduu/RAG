@@ -724,6 +724,10 @@ class RacerC1v6(RacerC1v5):
     """
     name = "C1v6"
 
+    @staticmethod
+    def _descriptive(ans: str) -> bool:
+        return looks_descriptive(ans)
+
     def _fill(self, n: int, step: str, question: str, answers: list[str], exact: list[str]) -> tuple[str, set[str]]:
         q, used = super()._fill(n, step, question, answers, exact)
         known = [a if a and not GIVE_UP.search(a) else "" for a in answers]
@@ -765,11 +769,11 @@ class RacerC1v6(RacerC1v5):
             terms = [a for a in used if a and a.lower() in q.lower()] + [t for t in exact if t.lower() in q.lower()]
             ans, quote, ok = self._step4(run, n, q, question, terms[:3], kept)
             # fix 1: an answer that later steps build on must be a name, not a description
-            if ok and n < len(steps) - 1 and looks_descriptive(ans):
+            if ok and n < len(steps) - 1 and self._descriptive(ans):
                 run.flags["renamed"] = run.flags.get("renamed", 0) + 1
                 nq = f"{q} Give only the specific name (of the person, place, organisation or work), not a description."
                 ans2, quote2, ok2 = self._step4(run, n, nq, question, terms[:3], kept)
-                if ok2 and not looks_descriptive(ans2):
+                if ok2 and not self._descriptive(ans2):
                     ans, quote = ans2, quote2
             prev = n - 1
             # fix 2: the earlier answer may carry extra words; retry with shorter forms before backtracking
@@ -820,6 +824,21 @@ class RacerC1v6(RacerC1v5):
         run.answer = ans
         run.sources = [str(x) for x in obj.get("sources", []) if isinstance(x, (str, int))]
         return self._shape_fix(run, question)
+
+
+def clearly_descriptive(ans: str) -> bool:
+    """Stricter than looks_descriptive: only answers that start like a description ("a café that ...")."""
+    return bool(re.match(r"^(a|an)\s", ans.strip(), re.I)) and not GIVE_UP.search(ans)
+
+
+class RacerC1v6b(RacerC1v6):
+    """C1 v6 with fix 1 made strict: on the practice set, "5+ words or starts with an article" fired on 58 of 200
+    questions and caused 7 of 8 regressions. Now only answers starting with "a"/"an" are re-asked for a name."""
+    name = "C1v6b"
+
+    @staticmethod
+    def _descriptive(ans: str) -> bool:
+        return clearly_descriptive(ans)
 
 
 class RacerC2v2(RacerC2):
@@ -934,4 +953,4 @@ class RacerC2v2(RacerC2):
         return run
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C2v2": RacerC2v2}
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C1v6b": RacerC1v6b, "C2v2": RacerC2v2}
