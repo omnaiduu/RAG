@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import queue
 import random
 import re
@@ -183,7 +184,9 @@ def main() -> None:
                 out_f.flush()
 
     with open(gen_path, "a") as f:
-        threads = [threading.Thread(target=worker, args=(m, jobs, lock, f, stats)) for m in mq.GEN_MODELS]
+        per_model = int(os.environ.get("WORKERS_PER_MODEL", "1"))  # >1 only with self-hosted models (no rate limits)
+        threads = [threading.Thread(target=worker, args=(m, jobs, lock, f, stats))
+                   for m in mq.GEN_MODELS for _ in range(per_model)]
         for t in threads:
             t.start()
         for t in threads:
@@ -197,6 +200,14 @@ def main() -> None:
             keys.add(normalize(g["question"]))
             uniq.append(g)
     print(f"valid after checks: {len(uniq)} / {len(gens)}", flush=True)
+    par = int(os.environ.get("CB_PARALLEL", "1"))
+    if par > 1:  # warm the filter's cache in parallel; the final call below then only reads it
+        parts = [uniq[i::par] for i in range(par)]
+        ts = [threading.Thread(target=mq.closed_book_filter, args=(p, OUT / "closed_book_filter.jsonl")) for p in parts]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
     kept = mq.closed_book_filter(uniq, OUT / "closed_book_filter.jsonl")
     kept += mq.comparisons(pool, random.Random(SEED), 200)
     print(f"kept after closed-book filter: {len(kept)}", flush=True)
