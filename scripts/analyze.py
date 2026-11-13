@@ -16,7 +16,7 @@ import math
 import sys
 
 sys.path.insert(0, ".")
-from rag.evaluate import correct  # noqa: E402
+from rag.evaluate import correct, golds  # noqa: E402
 from rag.racers import GIVE_UP  # noqa: E402
 from rag.tools import chunk_docs, load_corpus  # noqa: E402
 
@@ -34,7 +34,7 @@ def main() -> None:
 
     def ok(r: dict) -> bool:
         q = qs[r["qid"]]
-        return correct(r["answer"], [q["answer"], *q.get("aliases", [])])
+        return correct(r["answer"], golds(q))
 
     out: list[str] = []
     p = out.append

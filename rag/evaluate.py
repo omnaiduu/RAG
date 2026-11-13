@@ -27,11 +27,63 @@ def f1(pred: str, gold: str) -> float:
     return 2 * prec * rec / (prec + rec)
 
 
-def correct(pred: str, golds: list[str]) -> bool:
-    """Lenient match: exact after normalization, gold contained in a short prediction, or F1 >= 0.8."""
+NUM = re.compile(r"^\d[\d,.]*(?:[\u2013-]\d[\d,.]*)?$")
+MONTHS = re.compile(r"\b(january|february|march|april|may|june|july|august|september|october|november|december|"
+                    r"jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\b", re.I)
+QUALIFIER = re.compile(r"^(approximately|nearly|about|around|almost|roughly|some|over|more than)\s+", re.I)
+GENERIC = {"river", "stream", "lake", "neighborhood", "neighbourhood", "district", "city", "town", "village",
+           "county", "province", "island"}
+
+
+def core_forms(gold: str) -> set[str]:
+    """Shorter forms of an expected answer that mean the same thing. Rules are general and apply to every question:
+    a number without its unit word ("16 teams" -> "16"), a place without its region ("Monterrey, Nuevo León" ->
+    "Monterrey"; no digits), a name without a generic word ("river Cua" -> "Cua"). Not dates ("7 April 2024" stays whole)
+    and not lists ("France, Italy and Spain" stays whole). Matched exactly, never by containment."""
+    out = set()
+    g = QUALIFIER.sub("", gold.strip())
+    out.add(g)
+    words = g.split()
+    unit = words[1:]
+    if (len(words) >= 2 and NUM.match(words[0]) and not MONTHS.search(g) and len(unit) <= 4
+            and all(w[0].islower() for w in unit) and not any(c.isdigit() for c in " ".join(unit))):
+        if words[1].lower() in {"million", "billion", "thousand", "trillion"}:
+            out.add(" ".join(words[:2]))
+        else:
+            out.add(words[0])
+    if (g.count(",") == 1 and " and " not in g and " or " not in g and not any(c.isdigit() for c in g)
+            and not MONTHS.search(g)):
+        out.add(g.split(",")[0])
+    if len(words) >= 2 and words[0].lower() in GENERIC:
+        out.add(" ".join(words[1:]))
+    if len(words) >= 2 and words[-1].lower() in GENERIC:
+        out.add(" ".join(words[:-1]))
+    return {normalize(x) for x in out if normalize(x)}
+
+
+_FIXES: dict | None = None
+
+
+def golds(q: dict) -> list[str]:
+    """Expected answer + aliases + hand corrections from data/answer_fixes.json (if present)."""
+    global _FIXES
+    if _FIXES is None:
+        try:
+            with open("data/answer_fixes.json") as f:
+                _FIXES = json.load(f)
+        except OSError:
+            _FIXES = {}
+    return [q["answer"], *q.get("aliases", []), *_FIXES.get(q.get("qid", ""), {}).get("add", [])]
+
+
+def correct(pred: str, golds: list[str], strict: bool = False) -> bool:
+    """Lenient match: exact after normalization, gold contained in a short prediction, or F1 >= 0.8.
+    Unless strict, a prediction equal to a shorter core form of the gold (see core_forms) also counts."""
     np_ = normalize(pred)
     if not np_ or np_ == "unknown":
         return False
+    if not strict and any(np_ in core_forms(g) for g in golds):
+        return True
     for g in golds:
         ng = normalize(g)
         if not ng:
@@ -47,14 +99,14 @@ def score(results: list[dict], questions: dict[str, dict], chunk_title: dict[str
     rows = []
     for r in results:
         q = questions[r["qid"]]
-        golds = [q["answer"], *q.get("aliases", [])]
+        golds_ = golds(q)
         seen_titles = {chunk_title.get(c) for c in r["seen"]}
         support = q.get("support_titles", [])
         rows.append({
             "type": q.get("type", "?"),
-            "correct": correct(r["answer"], golds),
-            "em": max(normalize(r["answer"]) == normalize(g) for g in golds),
-            "f1": max(f1(r["answer"], g) for g in golds),
+            "correct": correct(r["answer"], golds_),
+            "em": max(normalize(r["answer"]) == normalize(g) for g in golds_),
+            "f1": max(f1(r["answer"], g) for g in golds_),
             "support_recall": (sum(t in seen_titles for t in support) / len(support)) if support else None,
             "all_support": all(t in seen_titles for t in support) if support else None,
             "calls": r["llm"]["calls"], "ptok": r["llm"]["prompt_tokens"], "ctok": r["llm"]["completion_tokens"],

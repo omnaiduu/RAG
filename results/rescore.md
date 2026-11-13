@@ -1,0 +1,49 @@
+# Old vs fixed grader
+
+Every run, scored with the old grader and with the fixed one (shorter core forms + data/answer_fixes.json).
+
+| Run | Racer | Model | Questions | Old grader | Fixed grader | Change |
+|---|---|---|---|---|---|---|
+| B-gpt-oss-120b-fresh | B | gpt-oss-120b | 52 | 33 (63%) | 34 (65%) | +1 |
+| gemma-e2b-fresh | A@lance | gemma-4-E2B-it | 60 | 25 (42%) | 26 (43%) | +1 |
+| gemma-e2b-fresh | C1@lance | gemma-4-E2B-it | 60 | 37 (62%) | 38 (63%) | +1 |
+| gemma-e2b-fresh | C1v3@lance | gemma-4-E2B-it | 60 | 40 (67%) | 41 (68%) | +1 |
+| gemma-e2b-fresh | C1v4@lance | gemma-4-E2B-it | 60 | 40 (67%) | 42 (70%) | +2 |
+| gemma-e2b-fresh | CB@lance | gemma-4-E2B-it | 60 | 1 (2%) | 1 (2%) | +0 |
+| gemma-e2b-lance-c2v2 | C2v2@lance | gemma-4-E2B-it | 200 | 94 (47%) | 96 (48%) | +2 |
+| gemma-e2b-lance-v3 | C1v3@lance | gemma-4-E2B-it | 200 | 129 (64%) | 137 (68%) | +8 |
+| gemma-e2b-lance-v4 | C1v4@lance | gemma-4-E2B-it | 200 | 134 (67%) | 141 (70%) | +7 |
+| gemma-e2b-lance | C1@lance | gemma-4-E2B-it | 200 | 122 (61%) | 122 (61%) | +0 |
+| gemma-e2b-lance | C1v2@lance | gemma-4-E2B-it | 200 | 117 (58%) | 125 (62%) | +8 |
+| gemma-e2b-part1 | A | gemma-4-E2B-it | 101 | 39 (39%) | 42 (42%) | +3 |
+| gemma-e2b-part1 | C1 | gemma-4-E2B-it | 101 | 64 (63%) | 64 (63%) | +0 |
+| gemma-e2b-part1 | C2v1 | gemma-4-E2B-it | 101 | 36 (36%) | 41 (41%) | +5 |
+| gemma-e2b-part1 | CB | gemma-4-E2B-it | 101 | 3 (3%) | 3 (3%) | +0 |
+| gemma-e2b-part1 | Dv1 | gemma-4-E2B-it | 101 | 14 (14%) | 14 (14%) | +0 |
+| gemma-e2b-part2 | A | gemma-4-E2B-it | 99 | 26 (26%) | 27 (27%) | +1 |
+| gemma-e2b-part2 | C1 | gemma-4-E2B-it | 99 | 61 (62%) | 61 (62%) | +0 |
+| gemma-e2b-part2 | C2 | gemma-4-E2B-it | 200 | 90 (45%) | 99 (50%) | +9 |
+| gemma-e2b-part2 | CB | gemma-4-E2B-it | 99 | 2 (2%) | 2 (2%) | +0 |
+| gemma-e2b-part2 | D | gemma-4-E2B-it | 200 | 40 (20%) | 40 (20%) | +0 |
+| gemma-e4b-fresh | C1@lance | gemma-4-E4B-it | 60 | 40 (67%) | 41 (68%) | +1 |
+| gemma-e4b-fresh | C1v3@lance | gemma-4-E4B-it | 60 | 45 (75%) | 47 (78%) | +2 |
+| gemma-e4b-fresh | C2v2@lance | gemma-4-E4B-it | 60 | 43 (72%) | 44 (73%) | +1 |
+| gemma-e4b-lance | C1v3@lance | gemma-4-E4B-it | 200 | 144 (72%) | 153 (76%) | +9 |
+| gemma-e4b-lance | C2v2@lance | gemma-4-E4B-it | 200 | 131 (66%) | 138 (69%) | +7 |
+| vllm-26b-a4b-w4-fresh | C1v3@lance | gemma-4-26B-A4B-it-qat-AWQ-INT4 | 60 | 47 (78%) | 49 (82%) | +2 |
+| vllm-26b-a4b-w4-loop-fresh | C2v2@lance | gemma-4-26B-A4B-it-qat-AWQ-INT4 | 60 | 47 (78%) | 49 (82%) | +2 |
+| vllm-e4b-bf16-fresh | C1v3@lance | gemma-4-E4B-it | 60 | 43 (72%) | 45 (75%) | +2 |
+| vllm-e4b-w4-C1v3-old | C1v3@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 140 (70%) | 149 (74%) | +9 |
+| vllm-e4b-w4-C1v4-old | C1v4@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 146 (73%) | 157 (78%) | +11 |
+| vllm-e4b-w4-C1v5-fresh | C1v5@lance | gemma-4-E4B-it-qat-w4a16-ct | 60 | 43 (72%) | 45 (75%) | +2 |
+| vllm-e4b-w4-C1v5-old | C1v5@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 150 (75%) | 159 (80%) | +9 |
+| vllm-e4b-w4-fresh | C1v3@lance | gemma-4-E4B-it-qat-w4a16-ct | 60 | 41 (68%) | 42 (70%) | +1 |
+| vllm-e4b-w4-loop-fresh | C2v2@lance | gemma-4-E4B-it-qat-w4a16-ct | 60 | 38 (63%) | 38 (63%) | +0 |
+| vllm-rr-base-old | C1v5@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 150 (75%) | 160 (80%) | +10 |
+| vllm-rr-none-k10-old | C1v5@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 129 (64%) | 139 (70%) | +10 |
+| vllm-rr-none-old | C1v5@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 117 (58%) | 123 (62%) | +6 |
+| vllm-rr-qwen3-old | C1v5@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 146 (73%) | 157 (78%) | +11 |
+| vllm-rr-v2m3-old | C1v5@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 144 (72%) | 153 (76%) | +9 |
+| vllm-think-e4b-old | C1v5@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 128 (64%) | 136 (68%) | +8 |
+| vllm-v6-e4b-old | C1v6@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 148 (74%) | 158 (79%) | +10 |
+| vllm-v6b-e4b-old | C1v6b@lance | gemma-4-E4B-it-qat-w4a16-ct | 200 | 149 (74%) | 159 (80%) | +10 |

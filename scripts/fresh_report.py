@@ -14,7 +14,7 @@ import math
 import sys
 
 sys.path.insert(0, ".")
-from rag.evaluate import correct  # noqa: E402
+from rag.evaluate import correct, golds  # noqa: E402
 
 SETUPS = [  # (racer, model, plain name, tuned on the old questions?)
     ("CB@lance", "gemma-4-E2B-it", "No search, memory only (2B)", "no"),
@@ -51,7 +51,7 @@ def main() -> None:
             if r.get("error") or r.get("flags", {}).get("error") or r["qid"] not in gold:
                 continue
             q = gold[r["qid"]]
-            runs[(r["racer"], r["model"].split("/")[-1])][r["qid"]] = correct(r["answer"], [q["answer"], *q["aliases"]])
+            runs[(r["racer"], r["model"].split("/")[-1])][r["qid"]] = correct(r["answer"], golds(q))
 
     fresh_ids = [q for q in gold if q.startswith("f")]
     rows = ["| Setup | Tuned on old questions? | Old questions | Fresh questions (95% range) | Change |",

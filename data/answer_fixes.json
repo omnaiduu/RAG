@@ -1,0 +1,6 @@
+{
+  "_about": "Hand corrections to expected answers, applied on top of the frozen question files (which stay unchanged). Decided by reading the source article, not by looking at which setup got the question right. Every setup is re-scored with them.",
+  "f003": {"add": ["56.21", "56.21 seconds"], "reason": "Expected answer was the raw table row '56.21 – Amber Sky (2014)'; the asked value is the time 56.21."},
+  "q118": {"add": ["Nationwide Arena"], "reason": "Question asks which arena; the city is extra detail."},
+  "q186": {"add": ["No. 52"], "reason": "'world No. 52' and 'No. 52' are the same ranking."}
+}

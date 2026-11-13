@@ -953,4 +953,67 @@ class RacerC2v2(RacerC2):
         return run
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C1v6b": RacerC1v6b, "C2v2": RacerC2v2}
+
+class RacerC1v7(RacerC1v5):
+    """C1 v5 with worked examples in the prompts (few-shot), no new code rules. Each example targets one failure type
+    measured on v5's wrong answers: plans with too few steps for 3-link questions; steps that drop a qualifier
+    ("defeated", "original"); a list or a nearby item returned instead of the one thing asked; a thing named by its
+    role ("the review site") not matched to its name; the wrong fact of the right type in the final answer.
+    All examples are invented: no names from either test set."""
+    name = "C1v7"
+
+    PLAN = (
+        "Break the question into the smallest lookup steps, in order (1 to 3 steps). Write each step as a short "
+        "question. If a step needs the answer of an earlier step, write #1 (or #2) in its place.\n"
+        "Rules: count the links first. Each \"the X of the Y that ...\" is one link, and every link needs its own step: "
+        "a question with three links needs 3 steps. Start from the most specific name or clue. Every step must say "
+        "what it is about: copy the name from the question or use #1. Keep every qualifier from the question "
+        "(defeated, original, first, former, code, birth name) in the step that needs it.\n"
+        'Example: "What is the capital of the country where Messi was born?" -> '
+        '{"steps": ["Where was Messi born?", "What is the capital of #1?"], "exact_terms": ["Messi"]}\n'
+        'Example (three links): "According to the Harbor Bridge article, the engineer who designed it studied at a '
+        'university founded by whom?" -> {"steps": ["Who designed the Harbor Bridge?", "Which university did #1 study '
+        'at?", "Who founded #2?"], "exact_terms": ["Harbor Bridge"]}\n'
+        'Example (keep the qualifier): "In the bout where Tom Reyes was defeated, what was the winner\'s birth name?" -> '
+        '{"steps": ["Who defeated Tom Reyes?", "What was the birth name of #1?"], "exact_terms": ["Tom Reyes"]}\n'
+        'Example (keep the qualifier): "As described on the album Night Roads, in what year was the original song '
+        'that its track \\"Blue Hour (Live)\\" covers released?" -> {"steps": ["Which original song does \\"Blue Hour '
+        '(Live)\\" on Night Roads cover?", "In what year was the original #1 released?"], "exact_terms": ["Night Roads", '
+        '"Blue Hour (Live)"]}\n'
+        'Example: "Which is taller, the Eiffel Tower or Big Ben?" -> '
+        '{"steps": ["How tall is the Eiffel Tower?", "How tall is Big Ben?"], "exact_terms": ["Eiffel Tower", "Big Ben"]}\n'
+        "exact_terms: names or titles copied exactly from the question.\n"
+        "Reply with only JSON.\n\nQUESTION: {q}")
+
+    STEP4 = (
+        "Answer the sub-question using only the passages. Reply with only JSON:\n"
+        '{{"quote": "<copy the one sentence from the passages that contains the answer>", '
+        '"answer": "<shortest answer, copied word for word from that sentence>"}}\n'
+        "Give the one thing asked for, as a name, number or date: not a list, not a description, not a nearby item. "
+        "Match every word of the sub-question (who won vs who lost, original vs cover, code vs full name).\n"
+        "Examples:\n"
+        '- Sub-question "Which band did Fenwick Records sign in 1995?"; passage "Fenwick worked with Kora, Velt and '
+        'Nimb, and in 1995 signed Velt." -> "answer": "Velt" (one band, not the list)\n'
+        '- Sub-question "What review site rated Night Roads?"; passage "Soundvault gave Night Roads four stars." -> '
+        '"answer": "Soundvault" (the site is named by its role in the question)\n'
+        '- Sub-question "What is the airport code of Lakeview Regional Airport?"; passage "Lakeview Regional Airport '
+        '(IATA: LKV) opened in 1961." -> "answer": "LKV" (the code, not the full name)\n'
+        '- Sub-question "Who defeated Tom Reyes?"; passage "Tom Reyes beat Sam Ortiz in 1979 and lost to Joe Banks '
+        'in 1982." -> "answer": "Joe Banks" (Reyes lost to Banks; Reyes beat Ortiz)\n'
+        'If the passages do not contain it, use "answer": "unknown".{note}\n\n'
+        "SUB-QUESTION: {q}\n\nPASSAGES:\n{p}")
+
+    FINAL = (
+        "Answer the question using the facts and passages. Reply with only JSON:\n"
+        '{{"quote": "<the sentence or fact the answer comes from>", '
+        '"reasoning": "<one short sentence: the facts you use; if the question compares, write both values>", '
+        '"answer": "<shortest possible answer: a name, date, number or few words>", "sources": ["<passage ids>"]}}\n'
+        "The passages often hold several facts of the right type (several years, several names): pick the one that "
+        "fits every word of the question.\n"
+        'Example: question asks the year the original song was released; passages say "the original was released in '
+        '1984" and "the cover version came out in 1991" -> "answer": "1984".\n'
+        'If the answer is not there, use "answer": "unknown".{note}\n\n'
+        "QUESTION: {q}\n\nFACTS FOUND:\n{f}\n\nPASSAGES:\n{p}")
+
+
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C1v6b": RacerC1v6b, "C1v7": RacerC1v7, "C2v2": RacerC2v2}
