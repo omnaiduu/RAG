@@ -137,7 +137,8 @@ def build() -> dict:
 
 @app.local_entrypoint()
 def run():
-    build.remote()
+    call = build.spawn()  # not tied to this local process: the build keeps running if it exits
+    print("spawned", call.object_id, flush=True)
 
 
 def main():  # not used with --detach; kept for interactive runs
