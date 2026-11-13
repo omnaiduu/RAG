@@ -87,7 +87,7 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
     torch.set_num_threads(1)  # many searches in parallel, one CPU core each
     # search runs on the CPU, as a deployment would: the GPU is left entirely to the language model
     tools = make_tools("lance", chunks, search_device, np.load("data/emb_bge_small_f16.npy"))
-    lock = threading.Semaphore(14)
+    lock = threading.Semaphore(1 if search_device == "cuda" else 14)  # GPU search: one at a time (fast), avoids per-thread CUDA memory
 
     class Locked:  # at most 14 searches at once (CPU cores); LLM calls run concurrently
         def __init__(self, inner):
