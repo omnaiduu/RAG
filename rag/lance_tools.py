@@ -19,7 +19,7 @@ import re
 
 import numpy as np
 
-from .tools import EMBED_MODEL, QUERY_PREFIX, RERANK_MODEL, Chunk, SearchTools, rrf
+from .tools import EMBED_MODEL, QUERY_PREFIX, Chunk, SearchTools, make_reranker, rrf
 
 TABLE = "chunks"
 
@@ -35,7 +35,7 @@ class LanceSearchTools(SearchTools):
         self.by_id = {c.id: i for i, c in enumerate(chunks)}
         self.texts = [c.indexed_text() for c in chunks]
         self.embedder = SentenceTransformer(EMBED_MODEL, device=device)
-        self.reranker = CrossEncoder(RERANK_MODEL, max_length=384, device=device)
+        self.reranker = make_reranker(device)
 
         self.db = lancedb.connect(db_path)
         if TABLE in self.db.table_names() and self.db.open_table(TABLE).count_rows() == len(chunks):

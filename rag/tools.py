@@ -12,14 +12,35 @@ from __future__ import annotations
 
 import json
 import re
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
-RERANK_MODEL = "BAAI/bge-reranker-base"
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "BAAI/bge-reranker-base")  # "none" = no reranker
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+
+QWEN_RERANK_PREFIX = ('<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and '
+                      'the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n')
+QWEN_RERANK_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+
+
+def make_reranker(device: str):
+    if RERANK_MODEL == "none":
+        return None
+    from sentence_transformers import CrossEncoder
+    return CrossEncoder(RERANK_MODEL, max_length=512 if "Qwen3" in RERANK_MODEL else 384, device=device)
+
+
+def rerank_pairs(query: str, docs: list[str]) -> list[tuple[str, str]]:
+    if "Qwen3-Reranker" not in RERANK_MODEL:
+        return [(query, d) for d in docs]
+    q = (QWEN_RERANK_PREFIX + "<Instruct>: Given a question, find passages that help answer it\n"
+         f"<Query>: {query}\n")
+    return [(q, f"<Document>: {d}{QWEN_RERANK_SUFFIX}") for d in docs]
 
 
 @dataclass
@@ -98,7 +119,7 @@ class SearchTools:
             embeddings = self.embedder.encode(self.texts, batch_size=batch_size, normalize_embeddings=True,
                                               convert_to_numpy=True, show_progress_bar=False)
         self.emb = embeddings.astype(np.float32)
-        self.reranker = CrossEncoder(RERANK_MODEL, max_length=384, device=device)
+        self.reranker = make_reranker(device)
 
     # ---- individual tools -------------------------------------------------
     def grep(self, phrase: str, k: int = 5) -> list[int]:
@@ -128,7 +149,10 @@ class SearchTools:
     def rerank(self, query: str, cands: list[int], k: int = 5) -> list[int]:
         if not cands:
             return []
-        scores = self.reranker.predict([(query, self.texts[i]) for i in cands], show_progress_bar=False)
+        k = int(os.environ.get("SHOW_K", k))  # experiment: show more passages to the model
+        if self.reranker is None:  # experiment: no reranker, keep the database's fused order
+            return cands[:k]
+        scores = self.reranker.predict(rerank_pairs(query, [self.texts[i] for i in cands]), show_progress_bar=False)
         order = sorted(range(len(cands)), key=lambda j: (-float(scores[j]), cands[j]))
         return [cands[j] for j in order[:k]]
 

@@ -36,7 +36,8 @@ app = modal.App("rag-bench", image=image)
 
 @app.function(gpu=GPU, timeout=5400, volumes={"/root/.cache/huggingface": hf_cache}, cpu=16, memory=32768)
 def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
-          concurrency: int = 60, questions_file: str = "data/fresh/questions.jsonl") -> dict:
+          concurrency: int = 60, questions_file: str = "data/fresh/questions.jsonl",
+          rerank: str = "BAAI/bge-reranker-base", show_k: int = 0, search_device: str = "cpu") -> dict:
     import subprocess
     import sys
     import threading
@@ -46,6 +47,9 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
     import requests
 
     os.chdir("/app")
+    os.environ["RERANK_MODEL"] = rerank
+    if show_k:
+        os.environ["SHOW_K"] = str(show_k)
     sys.path.insert(0, "/app")
     t_start = time.time()
     log = open("/tmp/vllm.log", "w")
@@ -82,7 +86,7 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
     import torch
     torch.set_num_threads(1)  # many searches in parallel, one CPU core each
     # search runs on the CPU, as a deployment would: the GPU is left entirely to the language model
-    tools = make_tools("lance", chunks, "cpu", np.load("data/emb_bge_small_f16.npy"))
+    tools = make_tools("lance", chunks, search_device, np.load("data/emb_bge_small_f16.npy"))
     lock = threading.Semaphore(14)
 
     class Locked:  # at most 14 searches at once (CPU cores); LLM calls run concurrently
@@ -148,7 +152,7 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
     gpu_name = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
                               capture_output=True, text=True).stdout.strip()
     stats = {
-        "model": model, "racer": racer, "gpu": gpu_name, "questions": len(records), "concurrency": concurrency,
+        "model": model, "racer": racer, "rerank": rerank, "show_k": show_k, "search_device": search_device, "gpu": gpu_name, "questions": len(records), "concurrency": concurrency,
         "startup_s": round(t_ready - t_start, 1), "wall_s": round(wall, 1),
         "answers_per_min": round(60 * len(records) / wall, 2),
         "latency_p50_s": lat[len(lat) // 2], "latency_max_s": lat[-1],
@@ -163,9 +167,10 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
 
 @app.local_entrypoint()
 def main(model: str, tag: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
-         concurrency: int = 60, questions: str = "fresh"):
+         concurrency: int = 60, questions: str = "fresh", rerank: str = "BAAI/bge-reranker-base", show_k: int = 0,
+         search_device: str = "cpu"):
     qfile = "data/fresh/questions.jsonl" if questions == "fresh" else "data/questions.jsonl"
-    out = bench.remote(model, racer, max_len, mem_util, concurrency, qfile)
+    out = bench.remote(model, racer, max_len, mem_util, concurrency, qfile, rerank, show_k, search_device)
     raw = ROOT / f"results/raw/vllm-{tag}-{questions}.jsonl"
     raw.parent.mkdir(parents=True, exist_ok=True)
     with open(raw, "w") as f:
