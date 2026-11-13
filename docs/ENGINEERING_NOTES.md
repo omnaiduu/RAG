@@ -757,6 +757,54 @@ varied examples is a different mechanism from five examples in a prompt).
 26B -> 47/60, vs 45 for E4B alone and 49 for the 26B on everything. The pipeline's warning flags catch only about half
 the errors (most errors are confident), so the gain is small.
 
+### A larger locked exam, easy questions, a router, and real response times
+
+**The exam** (`data/exam/questions.jsonl`, frozen in commit c28c522 before any run): 347 questions on articles no
+earlier set touched - 200 two-hop, 33 three-hop, 14 comparison, and **100 easy one-lookup questions** ("How many
+elevators are in JR Gate Tower?"). Same recipe as before (`data_build/make_exam.py`): same two question writers,
+same checks, same closed-book filter. Groq's free daily limit stopped it at 444 of 989 drafts; the rest ran on Modal
+with the same two open models self-hosted with vLLM on one A100-80GB (`modal_jobs/make_exam_modal.py`; Qwen3.8 as
+the official FP8 release). Only 235 unused new articles were left, so one article may start up to 3 questions (184
+distinct first articles): those questions are related, so the exam is a little less independent than 347 suggests.
+Practical lessons from the build: download models on a CPU machine first (no GPU billing while waiting); `spawn` a
+detached job so a local timeout cannot cancel it; Qwen3.8 (hybrid Mamba) needs `--max-num-seqs` below ~198;
+`modal volume get` is blocked by the sandbox proxy, so read results back through a small Modal function.
+
+**Results (E4B 4-bit, A10, fixed grader):**
+
+| Question type | Quick path (1 search, 1 answer) | Full chain (v5) | Router (R) |
+|---|---|---|---|
+| Easy, one lookup (100) | **86%** | 82% | **86%** |
+| Two-hop (200) | 46% | 68% | |
+| Three-hop (33) | 70% (small n) | 67% | |
+| Comparison (14) | 57% | 93% | |
+| All hard (247) | 50% | 69% | 68% |
+| **All 347** | 60% | 73% | **73%** |
+
+- On direct questions the small model is good (86%), and the cheap path beats the full chain.
+- The quick path cannot judge itself: it flagged only 42 of its 124 misses, so "quick first, full chain if unsure"
+  scores 67% (simulated, `scripts/router_sim.py`, `results/router_sim.md`).
+- **The planner is a good router**: a one-step plan -> quick path, otherwise the full chain reusing the same plan
+  (racer `R`). It sends 85 of the 100 easy questions and only 4 of 247 hard ones down the quick path. Real run:
+  253/347, same as the full chain (4 fixes, 4 breaks); easy questions 86% vs 82% at 2.3 vs 3.2 model calls and
+  1,583 vs 2,330 prompt tokens (-32%). The saving grows with the share of easy questions in real traffic.
+
+**Response times (router, one A10, questions kept in flight continuously):**
+
+| Questions in flight | Answers / min | Easy (quick path) p50 / p90 | Hard (full chain) p50 / p90 |
+|---|---|---|---|
+| 1 | 15 | 1.8 s / 2.6 s | 4.4 s / 7.1 s |
+| 10 | 44 | 5.3 s / 7.0 s | 14.7 s / 22.7 s |
+| 60 | 53 | (all: 67 s / 104 s) | |
+
+The GPU saturates at about 10-15 questions in flight: throughput barely rises from 10 to 60 (44 -> 53 per minute),
+only waiting time does. Time split per question at 60 in flight: search 9.9 s, model 52 s - the model is the
+bottleneck (each call 0.9 s alone, 12.9 s at 60 in flight), not search. The A10 is busy reading prompts (about 3,600
+prompt tokens/s, mostly the retrieved passages). So "175 requests fit in memory" was the wrong measure of users per
+GPU: the real limit is about 50 answers per minute per A10 with this pipeline. Cost at that rate: about $0.66 per
+1,000 answers (GPU + CPU + memory). Levers, untested: a faster GPU for prompt reading (cost per answer may fall),
+shorter passages, prefix caching, more questions on the quick path.
+
 ### Next steps (as of this session)
 1. **Easy-question set:** about 60 one-lookup questions, generated the same way (free with Groq). Check that step-by-step does not hurt easy questions, and measure how much cheaper "search once" is on them.
 2. **A router for real use:** answer with "search once" first; switch to step-by-step only when the question needs several lookups or the first answer fails its checks (not grounded, "unknown", wrong shape). This is the realistic design for most users per dollar.
