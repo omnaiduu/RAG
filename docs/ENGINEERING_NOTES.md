@@ -592,3 +592,23 @@ Prices are Modal list prices (A10 $0.000306/s, CPU $0.0000131/core/s, memory $0.
 **Spend so far on Modal:** about $2.
 
 **Recommended next step (one run):** take the two leaders, E4B 4-bit (most users) and 26B-A4B (most accurate), and load each with about 4× more simultaneous requests: E4B on the A10, 26B-A4B on a 48 GB L40S so it has room. That measures real cost per 1,000 answers at full load.
+
+### Prompt fixes for E4B 4-bit (tuned on the old 200, checked once on the fresh 60)
+
+**Where E4B 4-bit went wrong** (19 misses on the fresh 60, step-by-step code):
+- **Found the right article, answered "unknown": 5.** The answer was usually in a neighbouring passage it never saw.
+- **Found the right article, picked the wrong fact: 6.** For example "1990" instead of "1987".
+- **Never found a needed article: 7.** Usually an earlier step's answer was wrong, so the next search went astray.
+- **Grader too strict: 1.**
+
+**Fixes (general rules, nothing question-specific):**
+- **v4, retry a stuck step:** if a later step finds nothing, ask the earlier step again for a *different* answer, then retry. Also write the facts before the answer. Built earlier for the 2B, where it never fired (the 2B rarely says "unknown"). E4B says "unknown" often, so it now fires.
+- **v5, read wider (new):** if a step's answer is missing or not in the passages, the retry shows the passages just before and after the best hits in the same article, plus a wider search.
+
+| Version (E4B 4-bit, A10, vLLM) | Old 200 (tuning set) | Fresh 60 (checked once) | Time for 60 fresh |
+|---|---|---|---|
+| v3 (before) | 140 (70%) | 41 (68%) | 134 s |
+| v4 (+ retry) | 146 (73%) | not run | — |
+| **v5 (+ retry + read wider)** | **150 (75%)** | **43 (72%)** | 166 s |
+
+**Result.** Both question sets moved the same way: +5 points on the old 200 (17 fixed, 7 broken, p = 0.06) and +3 on the fresh 60 (4 fixed, 2 broken; too few to be statistically certain). The fix generalises, but the gain is modest. It costs about 25% more time per question, because the retries make extra searches and calls. The 26B-A4B still leads on fresh questions (47/60), so the remaining gap is mostly model ability, not prompts.
