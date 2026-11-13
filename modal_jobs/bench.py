@@ -37,7 +37,9 @@ app = modal.App("rag-bench", image=image)
 @app.function(gpu=GPU, timeout=5400, volumes={"/root/.cache/huggingface": hf_cache}, cpu=16, memory=32768)
 def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
           concurrency: int = 60, questions_file: str = "data/fresh/questions.jsonl",
-          rerank: str = "BAAI/bge-reranker-base", show_k: int = 0, search_device: str = "cpu") -> dict:
+          rerank: str = "BAAI/bge-reranker-base", show_k: int = 0, search_device: str = "cpu",
+          think: bool = False, think_budget: int = 1024) -> dict:
+    import re
     import subprocess
     import sys
     import threading
@@ -110,6 +112,27 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
             super().__init__("m", reasoning_effort=None)
             self.key = "none"
 
+        def raw(self, messages, max_tokens=1024, tools=None, temperature=0.0, json_mode=False):
+            from rag.llm import Usage
+            body = {"model": "m", "messages": messages, "max_tokens": max_tokens + (think_budget if think else 0),
+                    "temperature": 0.0, "seed": 0}
+            if think:  # Gemma 4 thinking mode: reasoning first, then the answer
+                body["chat_template_kwargs"] = {"enable_thinking": True}
+                body["skip_special_tokens"] = False
+            t0 = time.time()
+            r = requests.post(self.URL, json=body, timeout=600)
+            r.raise_for_status()
+            data = r.json()
+            msg = data["choices"][0]["message"]
+            text = msg.get("content") or ""
+            if think:
+                text = re.sub(r"<\|channel>thought.*?<channel\|>", "", text, flags=re.S)
+                text = re.sub(r"<\|channel>thought.*", "", text, flags=re.S)  # thinking cut off: no answer
+                text = re.sub(r"<[|][^>]*>|<[^>]*[|]>", "", text)
+            u = data.get("usage", {})
+            return {"content": text.strip()}, Usage(1, u.get("prompt_tokens", 0), u.get("completion_tokens", 0),
+                                                     time.time() - t0)
+
     llm = LocalLLM()
     shared_tools = Locked(tools)
     questions = [json.loads(l) for l in open(questions_file)]
@@ -152,7 +175,7 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
     gpu_name = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
                               capture_output=True, text=True).stdout.strip()
     stats = {
-        "model": model, "racer": racer, "rerank": rerank, "show_k": show_k, "search_device": search_device, "gpu": gpu_name, "questions": len(records), "concurrency": concurrency,
+        "model": model, "racer": racer, "rerank": rerank, "show_k": show_k, "search_device": search_device, "think": think, "gpu": gpu_name, "questions": len(records), "concurrency": concurrency,
         "startup_s": round(t_ready - t_start, 1), "wall_s": round(wall, 1),
         "answers_per_min": round(60 * len(records) / wall, 2),
         "latency_p50_s": lat[len(lat) // 2], "latency_max_s": lat[-1],
@@ -168,9 +191,10 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
 @app.local_entrypoint()
 def main(model: str, tag: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
          concurrency: int = 60, questions: str = "fresh", rerank: str = "BAAI/bge-reranker-base", show_k: int = 0,
-         search_device: str = "cpu"):
+         search_device: str = "cpu", think: bool = False, think_budget: int = 1024):
     qfile = "data/fresh/questions.jsonl" if questions == "fresh" else "data/questions.jsonl"
-    out = bench.remote(model, racer, max_len, mem_util, concurrency, qfile, rerank, show_k, search_device)
+    out = bench.remote(model, racer, max_len, mem_util, concurrency, qfile, rerank, show_k, search_device, think,
+                       think_budget)
     raw = ROOT / f"results/raw/vllm-{tag}-{questions}.jsonl"
     raw.parent.mkdir(parents=True, exist_ok=True)
     with open(raw, "w") as f:
