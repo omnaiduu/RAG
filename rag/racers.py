@@ -598,10 +598,11 @@ class RacerC1v4(RacerC1v3):
             q = f"{q} ({'; '.join(exact)})"  # anchor a step that names nothing from the question
         return q, used
 
-    def solve(self, question: str) -> Run:
-        run = Run()
-        plan = self.ask_json(run, self.PLAN.replace("{q}", question), max_new_tokens=200)
-        run.trace.append({"step": "plan", "out": plan})
+    def solve(self, question: str, run: Run | None = None, plan: dict | None = None) -> Run:
+        run = run or Run()
+        if plan is None:
+            plan = self.ask_json(run, self.PLAN.replace("{q}", question), max_new_tokens=200)
+            run.trace.append({"step": "plan", "out": plan})
         steps = [str(s) for s in plan.get("steps", []) if isinstance(s, str) and s.strip()][: self.max_steps]
         steps = steps or [question]
         exact = [str(t) for t in plan.get("exact_terms", []) if isinstance(t, str) and t.strip()][:3]
@@ -1032,4 +1033,25 @@ class RacerQ(RacerC1v5):
         return self._shape_fix(run, question)
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C1v6b": RacerC1v6b, "C1v7": RacerC1v7, "Q": RacerQ, "C2v2": RacerC2v2}
+
+class RacerR(RacerC1v5):
+    """Router: the planner decides. A one-step plan (a direct, one-lookup question) takes the quick path: one search
+    with the whole question and one answer form (plus v5's read-wider retry if the answer is not in the passages).
+    A longer plan runs the full v5 chain, reusing the same plan (no second planning call)."""
+    name = "R"
+
+    def solve(self, question: str, run: Run | None = None, plan: dict | None = None) -> Run:
+        run = Run()
+        plan = self.ask_json(run, self.PLAN.replace("{q}", question), max_new_tokens=200)
+        run.trace.append({"step": "plan", "out": plan})
+        steps = [s for s in plan.get("steps", []) if isinstance(s, str) and s.strip()]
+        if len(steps) <= 1:
+            run.flags["route"] = "quick"
+            ans, _, _ = self._step4(run, 0, question, question, [], [])
+            run.answer = ans
+            return self._shape_fix(run, question)
+        run.flags["route"] = "full"
+        return super().solve(question, run=run, plan=plan)
+
+
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C1v6b": RacerC1v6b, "C1v7": RacerC1v7, "Q": RacerQ, "R": RacerR, "C2v2": RacerC2v2}
