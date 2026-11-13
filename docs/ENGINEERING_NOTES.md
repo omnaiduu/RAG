@@ -723,6 +723,40 @@ These made the failure analysis above possible.
 
 **Decision:** stop fine-tuning on this question set after v6b. Gains are now within noise (±2–3 questions), and further tuning would fit the test's quirks rather than real use.
 
+### Where the chain breaks, a grader fix, and a few-shot test that did not help
+
+**Where failed chains first go wrong** (v5, old 200; each step's answer compared with the article it should land on):
+step 1 wrong 28, step 2 wrong 7, all middle steps right but final answer wrong 13. Step 1 carries the question's
+indirect description ("the database referenced in the song's coverage"); later steps get a clean name. Typical slips:
+a list instead of one name, the wrong item of the right kind (the boxer who *beat* Snipes instead of the one he
+defeated), a role not matched to a name. Search itself is rarely the problem (1 first-search miss in 200).
+Plans are often too short: 37 of 50 three-hop questions got a 2-step plan (59% right) vs 13 with 3 steps (77%).
+Accuracy by shape: comparison 95%, 2-hop 73%, 3-hop 64% (old grader) - roughly 10 points lost per extra link.
+
+**Grader fix.** The grader rejected correct answers shorter than the expected one ("16" vs "16 teams"). New rule in
+`rag/evaluate.py` (`core_forms`), applied to every question and audited on all 260 expected answers *before* looking
+at model answers: accept a number without its unit word, a place without its region (one comma, no digits), a name
+without a generic word (river, neighborhood, ...). Never dates or lists. 30 questions gain a short form. Three hand
+corrections with reasons in `data/answer_fixes.json` (question files stay frozen). The audit caught three bugs in the
+first draft of the rule ("40,290" -> "40", "January 30, 1850" -> "January 30", "Martino" read as March).
+Every run re-scored (`scripts/rescore.py`, `results/rescore.md`): +6 to +11 on the old 200, +0 to +2 on the fresh 60;
+no setup changes rank. v5: 150 -> **160/200 (80%)**; fresh 43 -> **45/60 (75%)**; 26B fresh 47 -> 49 (82%).
+
+**Few-shot test (C1v7): worked examples in the plan, step and final prompts, no new code rules.** Invented examples,
+no names from either test set, one per measured failure type (3 links -> 3 steps, keep "defeated"/"original", one name
+not a list, role -> name, code not full name, pick the fact that fits every word).
+Result on the old 200 (fixed grader): **154 vs v5's 160**; 10 fixes, 16 breaks, sign test p = 0.33 (no real
+difference, leaning worse). 3-hop 35 -> 30, 2-hop 86 -> 84, comparison 39 -> 40. The examples did not teach hop
+counting: 3-hop questions with a 3-step plan went 13 -> 14 of 50, while 2-hop questions wrongly given 3 steps went
+3 -> 11. Prompts grew 16% (976k -> 1,135k tokens); speed unchanged. Not run on the fresh set. v5 stays.
+Reading: a 4B model copies the surface of examples rather than the rule behind them, the same over-application seen
+with the v6 rule. This is weak evidence against cheap gains from LoRA too (it is not proof: training on thousands of
+varied examples is a different mechanism from five examples in a prompt).
+
+**Cascade, simulated on existing fresh-set runs (free):** E4B answers; only its "unknown" answers (6 of 60) go to the
+26B -> 47/60, vs 45 for E4B alone and 49 for the 26B on everything. The pipeline's warning flags catch only about half
+the errors (most errors are confident), so the gain is small.
+
 ### Next steps (as of this session)
 1. **Easy-question set:** about 60 one-lookup questions, generated the same way (free with Groq). Check that step-by-step does not hurt easy questions, and measure how much cheaper "search once" is on them.
 2. **A router for real use:** answer with "search once" first; switch to step-by-step only when the question needs several lookups or the first answer fails its checks (not grounded, "unknown", wrong shape). This is the realistic design for most users per dollar.
