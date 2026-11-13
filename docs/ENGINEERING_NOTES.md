@@ -657,3 +657,83 @@ The model writes its reasoning before each JSON answer (up to ~1,000 extra token
 - **Some reasoning ran past the token budget**, so 12 questions got no answer at all.
 
 For short, structured extraction steps, the plan-and-check code already does the "thinking" for the model; free-form reasoning on top adds cost and doubt rather than accuracy.
+
+### Chain fixes (v6) from reading failure traces, and why one backfired
+
+Reading the step-by-step traces of E4B v5's wrong answers (full examples in `docs/PIPELINE_EXPLAINED.md`, section 6) showed that most misses were **broken chains, not misreading**:
+
+| Failure | Example | v6 fix (general rule) |
+|---|---|---|
+| Our "middle answer" rule rejected the right answer | Final "Leiden University" rejected because step 2 had found it; forced to "Adapt" | **Ask, don't forbid:** tell the model which step gave that answer; it may keep it if the question asks for exactly that |
+| A vague step returned a description | "What is the description in 'Chocolate café' about?" → "a café that specializes in drinking chocolate" | **Name, not description:** re-ask for the specific name |
+| Extra words broke the next search | "Ashoka Changemakers Fellow" → "Who founded Ashoka Changemakers Fellow?" → nothing | **Shorter form:** retry with "Ashoka Changemakers", then "Ashoka", before backtracking |
+| A step forgot what it was about | "In what year was the original song mentioned … released?" (no #1) → found a different song | **Wider back-reference:** "mentioned / described / original …" adds the previous answer (not for comparisons) |
+| The plan did not split the question | One step for a two-lookup question → "unknown" | not fixed |
+| Ambiguous question or strict grading | "197" vs "approximately 190 countries" | not fixable fairly |
+
+**Result on the practice set (E4B 4-bit, GPU reranker):**
+- v5: **150/200**.
+- v6: **148/200** (fixed 6, broke 8).
+
+The trace flags showed why. "Name, not description" used a loose test ("5+ words or starts with an article") and fired on **58 of 200 questions**, 42 of them already correct. It was involved in **7 of the 8 breaks**: "Kohei Fujimura" became "Fujimura", and correct dates were swapped for other dates. The "shorter form" retry did what it should; it was part of 2 of the 6 fixes.
+
+**v6b** keeps all four fixes but makes the name check strict: only answers starting with "a"/"an" (e.g. "a café that …") are re-asked. *(Result: see below when available.)*
+
+**Lesson.** A check that fires on 30% of questions to fix a problem seen in 2% of them does more harm than good. Every rule should log when it fires, and be judged on both what it fixes and what it breaks.
+
+### Could the model tell us *why* it chose something?
+
+**Already logged:**
+- **Every step reply has a `quote` field:** the exact sentence the answer came from.
+- **The final reply has a `reasoning` field.**
+
+These made the failure analysis above possible.
+
+**Proposed: a debug-only `why` field** on plan and step replies ("why one step?", "why 1990 and not 1987?"), run once on the practice set. Cautions:
+- **Small models often invent reasons after the fact,** so a "why" is a clue, not proof.
+- **Asking for reasons can change the answers.** Full thinking mode cost 22 questions.
+- **It adds tokens.**
+
+**More reliable:** a large model reads the traces and classifies each failure, which is how the v6 fixes were found. It costs no GPU time.
+
+### Is this test realistic? How often do such hard questions occur in real use?
+
+**Fair as a comparison:**
+- **Same questions, rules and grader for every setup.**
+- **Answers can't come from memory:** the documents post-date the models, and memory-answerable questions were removed.
+- **The exam set was locked before any run.**
+
+**Not representative of typical real traffic:**
+1. **Every question needs 2–3 lookups,** with the middle entity hidden on purpose ("the player he mentions"). Most real RAG questions (support docs, internal knowledge bases, reports) need **one** lookup. Multi-step questions are a minority: the hard tail.
+2. **The wording is machine-generated and stilted.** A real user would ask "Where did Anthony Brooke die?", not "According to the account of the Malay National Union of Sarawak, where did the former Rajah Muda die?".
+3. **Some questions are ambiguous or strictly graded.**
+4. **The documents are Wikipedia,** not product manuals or company documents.
+
+**What transfers to real use:**
+- **Step-by-step code helps small models on hard questions.**
+- **A reranker is essential.**
+- **Run the reranker on the GPU, keep thinking off, and use 4-bit E4B** for users per GPU.
+- **Rules must be judged by what they break as well as what they fix.**
+
+**What does not transfer:** the exact scores. Real users would see higher accuracy on simpler questions.
+
+**A risk this test hides.** For one-lookup questions the step-by-step pipeline may be overkill: about 5 model calls instead of 1 for "search once, then answer". It costs more and may over-complicate easy questions.
+
+**Decision:** stop fine-tuning on this question set after v6b. Gains are now within noise (±2–3 questions), and further tuning would fit the test's quirks rather than real use.
+
+### Next steps (as of this session)
+1. **Easy-question set:** about 60 one-lookup questions, generated the same way (free with Groq). Check that step-by-step does not hurt easy questions, and measure how much cheaper "search once" is on them.
+2. **A router for real use:** answer with "search once" first; switch to step-by-step only when the question needs several lookups or the first answer fails its checks (not grounded, "unknown", wrong shape). This is the realistic design for most users per dollar.
+3. **Test on real data:** the owner's actual documents and 30–50 real questions, if available. Worth more than any further tuning here.
+4. **Heavy-load cost test:** send about 4× more questions at once to E4B 4-bit on the A10, to measure real cost per 1,000 answers when the GPU is fully busy.
+
+### Session state, for continuing later
+- **Best setup:** E4B 4-bit (`google/gemma-4-E4B-it-qat-w4a16-ct`), C1v5, bge-reranker-base on the GPU, thinking off.
+  - Practice set: 150/200.
+  - Fresh 60: 43/60, with search on the CPU in that run.
+- **Benchmark command (Modal, A10):**
+  `GPU_TYPE=A10 modal run modal_jobs/bench.py --model google/gemma-4-E4B-it-qat-w4a16-ct --racer C1v5 --questions old --search-device cuda --mem-util 0.65 --tag <name>`
+  - Options: `--questions fresh|old`, `--rerank <model|none>`, `--show-k N`, `--think`, `--racer C1v3|C1v4|C1v5|C1v6|C1v6b|C2v2`.
+  - Outputs: `results/raw/vllm-<tag>-<set>.jsonl` and `results/bench/<tag>.json`.
+- **Modal from this sandbox:** `pip install "modal[api-proxy-support]"` (official HTTP-proxy support). `input-plane.us-east.modal.com` must be in the environment's allowed hosts. The token lives in `~/.modal.toml`, never in the repo.
+- **Spend:** about $9 of the $30 Modal credit used so far.
