@@ -63,7 +63,8 @@ def build() -> dict:
     for name, (hf, port, share) in MODELS.items():  # one after the other: each checks free memory at start
         log = open(f"/tmp/vllm-{port}.log", "w")
         p = subprocess.Popen(["vllm", "serve", hf, "--port", str(port), "--served-model-name", name,
-                              "--max-model-len", "4096", "--gpu-memory-utilization", str(share)],
+                              "--max-model-len", "4096", "--gpu-memory-utilization", str(share),
+                              "--max-num-seqs", "64"],  # we send <= 32 at once; Qwen3.8's Mamba cache fits ~198
                              stdout=log, stderr=subprocess.STDOUT)
         for _ in range(900):
             try:
