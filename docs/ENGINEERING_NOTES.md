@@ -612,3 +612,48 @@ Prices are Modal list prices (A10 $0.000306/s, CPU $0.0000131/core/s, memory $0.
 | **v5 (+ retry + read wider)** | **150 (75%)** | **43 (72%)** | 166 s |
 
 **Result.** Both question sets moved the same way: +5 points on the old 200 (17 fixed, 7 broken, p = 0.06) and +3 on the fresh 60 (4 fixed, 2 broken; too few to be statistically certain). The fix generalises, but the gain is modest. It costs about 25% more time per question, because the retries make extra searches and calls. The 26B-A4B still leads on fresh questions (47/60), so the remaining gap is mostly model ability, not prompts.
+
+### The reranker: how much it matters, and whether a better one helps
+
+**What it does.** Each search returns about 30 candidate passages, and a cross-encoder reranker (`BAAI/bge-reranker-base`, ~280M parameters) picks the 5 the model sees.
+
+**Search was the bottleneck.** With 60 questions at once, each question spent ~83 s on search but only ~10 s in the language model.
+
+| Part of one search (1 CPU core) | Time |
+|---|---|
+| Query embedding | 0.7 s |
+| **LanceDB hybrid query** | **0.5 s** |
+| Exact-phrase lookups | 0.02 s |
+| **Reranking 30 passages** | **20.6 s** |
+
+So the database was never the problem; the reranker on the CPU was. Moving the reranker to the GPU (one search at a time, each a few milliseconds) kept accuracy at 150/200 and cut the time for 200 questions from 494 s to 282 s.
+
+**Audit.** Replaying all 162 searches E4B made on the fresh set: a needed *article* was in the reranker's top 5 in 161 of 162 cases. The reranker's value is choosing the right *passage* within articles.
+
+| E4B 4-bit, v5 code, old 200 questions | Correct | Time for 200 |
+|---|---|---|
+| **bge-reranker-base (current, GPU)** | **150** | **282 s** |
+| bge-reranker-v2-m3 (larger, newer) | 144 | 632 s |
+| Qwen3-Reranker-0.6B (2025) | 146 | 1,254 s |
+| No reranker (database's fused order, top 5) | 117 | 160 s |
+| No reranker, top 10, the LLM picks | 129 | 213 s |
+
+**Takeaways:**
+- **A reranker is essential:** +33 questions, about 16 points.
+- **Showing the LLM more passages instead only partly makes up for it,** and costs ~30% more input.
+- **Bigger or newer rerankers were not better here,** and were 2–4× slower. Keep bge-reranker-base, run on the GPU.
+
+### Thinking mode (Gemma 4 `enable_thinking`)
+
+The model writes its reasoning before each JSON answer (up to ~1,000 extra tokens per call); code discards the reasoning and reads only the JSON.
+
+| E4B 4-bit, v5 code, old 200 | Correct | Time for 200 | Tokens generated |
+|---|---|---|---|
+| Thinking off | **150** | **282 s** | 73K |
+| Thinking on | 128 (36 broken, 14 fixed, p < 0.01) | 858 s | 843K |
+
+**Thinking made it worse and 3× slower**, with 11.6× more tokens. Two reasons:
+- **"Unknown" answers rose from 12 to 42.** Reasoning at length, the small model talked itself out of answers that were in the passages.
+- **Some reasoning ran past the token budget**, so 12 questions got no answer at all.
+
+For short, structured extraction steps, the plan-and-check code already does the "thinking" for the model; free-form reasoning on top adds cost and doubt rather than accuracy.
