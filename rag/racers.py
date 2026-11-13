@@ -699,6 +699,129 @@ class RacerC1v5(RacerC1v4):
         return str(obj.get("answer") or "unknown"), str(obj.get("quote", "")), False
 
 
+BACKREF = re.compile(r"\b(mentioned|described|referred to|above|original|aforementioned|in question|that|this|these|"
+                     r"those|it|its|he|she|his|her|they|their|the same)\b", re.I)
+DESCRIPTIVE = re.compile(r"^(a|an|the|one|some)\s", re.I)
+
+
+def looks_descriptive(ans: str) -> bool:
+    """An answer that describes something instead of naming it ("a café that specializes in ...")."""
+    a = ans.strip()
+    return bool(a) and not GIVE_UP.search(a) and (len(a.split()) >= 5 or bool(DESCRIPTIVE.match(a)))
+
+
+class RacerC1v6(RacerC1v5):
+    """C1 v5 plus four general fixes to the chain of steps (found by reading failure traces):
+
+    1. Name, not description: an answer that a later step builds on must be a name. If it reads like a
+       description ("a café that specializes in ...") the step is asked again for the specific name.
+    2. Shorter form: when a step that builds on an earlier answer finds nothing, retry with a shorter form of
+       that answer ("Ashoka Changemakers Fellow" -> "Ashoka Changemakers" -> "Ashoka") before backtracking.
+    3. Wider back-reference: a step that refers back without #1 ("the original song mentioned ...") gets the
+       previous answer added, as "that"/"this" already did. Not for comparison questions, whose steps are independent.
+    4. Softer middle-answer check: instead of forbidding an earlier step's answer, the model is told which step
+       it came from and asked to keep it only if the question asks for exactly that.
+    """
+    name = "C1v6"
+
+    def _fill(self, n: int, step: str, question: str, answers: list[str], exact: list[str]) -> tuple[str, set[str]]:
+        q, used = super()._fill(n, step, question, answers, exact)
+        known = [a if a and not GIVE_UP.search(a) else "" for a in answers]
+        independent = bool(CHOICE_Q.search(question) or YESNO_Q.search(question))
+        if (n > 0 and not used and known and known[-1] and not independent and "#" not in step
+                and BACKREF.search(step) and known[-1].lower() not in q.lower()):
+            q = f"{step} ({known[-1]})"
+            used = {known[-1]}
+        return q, used
+
+    @staticmethod
+    def _shorter(ans: str) -> list[str]:
+        words = ans.split()
+        out = []
+        for cut in (len(words) - 1, 1):
+            if 1 <= cut < len(words):
+                s = " ".join(words[:cut]).strip(" ,;:'\"")
+                if s and s not in out:
+                    out.append(s)
+        return out
+
+    def solve(self, question: str) -> Run:
+        run = Run()
+        plan = self.ask_json(run, self.PLAN.replace("{q}", question), max_new_tokens=200)
+        run.trace.append({"step": "plan", "out": plan})
+        steps = [str(s) for s in plan.get("steps", []) if isinstance(s, str) and s.strip()][: self.max_steps]
+        steps = steps or [question]
+        exact = [str(t) for t in plan.get("exact_terms", []) if isinstance(t, str) and t.strip()][:3]
+
+        answers: list[str] = []
+        queries: list[str] = []
+        quotes: list[str] = []
+        kept: list[int] = []
+        used_as_input: set[str] = set()
+        backtracked = False
+        n = 0
+        while n < len(steps):
+            q, used = self._fill(n, steps[n], question, answers, exact)
+            terms = [a for a in used if a and a.lower() in q.lower()] + [t for t in exact if t.lower() in q.lower()]
+            ans, quote, ok = self._step4(run, n, q, question, terms[:3], kept)
+            # fix 1: an answer that later steps build on must be a name, not a description
+            if ok and n < len(steps) - 1 and looks_descriptive(ans):
+                run.flags["renamed"] = run.flags.get("renamed", 0) + 1
+                nq = f"{q} Give only the specific name (of the person, place, organisation or work), not a description."
+                ans2, quote2, ok2 = self._step4(run, n, nq, question, terms[:3], kept)
+                if ok2 and not looks_descriptive(ans2):
+                    ans, quote = ans2, quote2
+            prev = n - 1
+            # fix 2: the earlier answer may carry extra words; retry with shorter forms before backtracking
+            if not ok and used and prev >= 0 and answers[prev] in used:
+                for short in self._shorter(answers[prev]):
+                    run.flags["shortened"] = run.flags.get("shortened", 0) + 1
+                    sq = q.replace(answers[prev], short)
+                    if sq == q:
+                        continue
+                    sterms = [short if t == answers[prev] else t for t in terms][:3]
+                    ans, quote, ok = self._step4(run, n, sq, question, sterms, kept)
+                    if ok:
+                        q = sq
+                        break
+            if not ok and used and not backtracked and prev >= 0 and answers[prev] in used:
+                backtracked = True
+                run.flags["backtrack"] = 1
+                pq, pused = self._fill(prev, steps[prev], question, answers[:prev], exact)
+                pterms = [t for t in exact if t.lower() in pq.lower()]
+                pans, pquote, pok = self._step4(run, prev, pq, question, pterms[:3], kept, avoid=answers[prev])
+                if pok:
+                    answers[prev], queries[prev], quotes[prev] = pans, pq, pquote
+                    continue
+            used_as_input |= used
+            answers.append(ans); queries.append(q); quotes.append(quote)
+            n += 1
+
+        facts = [f"{q} -> {a}" + (f' (from: "{qt[:200]}")' if qt else "") for q, a, qt in zip(queries, answers, quotes)]
+        facts_txt = "\n".join(f"- {f}" for f in facts)
+        note = ""
+        for attempt in (0, 1):
+            obj = self.ask_json(run, self.FINAL.format(q=question, f=facts_txt, p=self.fmt(kept[-10:]), note=note),
+                                max_new_tokens=220)
+            ans = str(obj.get("answer") or "unknown")
+            run.trace.append({"step": "answer", "attempt": attempt, "out": obj})
+            src = next((qq for qq, aa in zip(queries, answers) if _norm(aa) == _norm(ans)), None)
+            if src is not None and _norm(ans) in {_norm(a) for a in used_as_input} and attempt == 0:
+                # fix 4: ask, don't forbid
+                run.flags["bridge_check"] = run.flags.get("bridge_check", 0) + 1
+                note = (f'\nCheck: "{ans}" answered the earlier step "{src}". If the question asks for exactly that, '
+                        "give it again; if the question asks for something further, give that instead.")
+                continue
+            if not self._grounded(ans, kept, facts_txt + " " + question) and attempt == 0:
+                run.flags["ungrounded_final"] = run.flags.get("ungrounded_final", 0) + 1
+                note = "\nNote: your last answer was not found in the facts or passages. Copy it from them."
+                continue
+            break
+        run.answer = ans
+        run.sources = [str(x) for x in obj.get("sources", []) if isinstance(x, (str, int))]
+        return self._shape_fix(run, question)
+
+
 class RacerC2v2(RacerC2):
     """C2 with the general checks that helped C1. The model still picks the tool and query every turn.
 
@@ -811,4 +934,4 @@ class RacerC2v2(RacerC2):
         return run
 
 
-RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C2v2": RacerC2v2}
+RACERS = {"A": RacerA, "B": RacerB, "C1": RacerC1, "C2": RacerC2, "D": RacerD, "CB": ClosedBook, "C1v2": RacerC1v2, "C1v3": RacerC1v3, "C1v4": RacerC1v4, "C1v5": RacerC1v5, "C1v6": RacerC1v6, "C2v2": RacerC2v2}
