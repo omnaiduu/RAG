@@ -4,7 +4,7 @@ Same prompts, same checks, same closed-book filter, temperature 0. Resumes from 
 
   modal run modal_jobs/make_exam_modal.py::download     # CPU only: put both models in the cache volume
   modal run --detach modal_jobs/make_exam_modal.py::run  # GPU: build; files saved to volume rag-exam as it goes
-  modal volume get --force rag-exam / data/exam/        # fetch candidates/closed_book_filter/questions.jsonl
+  modal run modal_jobs/make_exam_modal.py::fetch        # copy the files from the volume into data/exam/
 """
 from __future__ import annotations
 
@@ -145,5 +145,18 @@ def run():
 def main():  # not used with --detach; kept for interactive runs
     out = build.remote()
     for name, text in out.items():
+        (ROOT / "data/exam" / name).write_text(text)
+        print(name, len(text.splitlines()), "lines")
+
+
+@app.function(volumes={"/out": exam_vol}, timeout=300)
+def read_out() -> dict:
+    import os
+    return {f: open(f"/out/{f}").read() for f in os.listdir("/out") if f.endswith(".jsonl")}
+
+
+@app.local_entrypoint()
+def fetch():
+    for name, text in read_out.remote().items():
         (ROOT / "data/exam" / name).write_text(text)
         print(name, len(text.splitlines()), "lines")
