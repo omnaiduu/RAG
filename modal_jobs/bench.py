@@ -33,8 +33,8 @@ hf_cache = modal.Volume.from_name("rag-hf-cache", create_if_missing=True)
 app = modal.App("rag-bench", image=image)
 
 
-@app.function(gpu=GPU, timeout=5400, volumes={"/root/.cache/huggingface": hf_cache}, cpu=8, memory=32768)
-def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.85,
+@app.function(gpu=GPU, timeout=5400, volumes={"/root/.cache/huggingface": hf_cache}, cpu=16, memory=32768)
+def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
           concurrency: int = 60) -> dict:
     import subprocess
     import sys
@@ -78,10 +78,13 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
 
     chunks = chunk_docs(load_corpus("data/corpus.jsonl.gz"))
     os.environ["LANCEDB_PATH"] = "/tmp/lancedb"
-    tools = make_tools("lance", chunks, "cuda", np.load("data/emb_bge_small_f16.npy"))
-    lock = threading.Lock()
+    import torch
+    torch.set_num_threads(1)  # many searches in parallel, one CPU core each
+    # search runs on the CPU, as a deployment would: the GPU is left entirely to the language model
+    tools = make_tools("lance", chunks, "cpu", np.load("data/emb_bge_small_f16.npy"))
+    lock = threading.Semaphore(14)
 
-    class Locked:  # search models are shared; one search at a time, LLM calls run concurrently
+    class Locked:  # at most 14 searches at once (CPU cores); LLM calls run concurrently
         def __init__(self, inner):
             self._inner = inner
 
@@ -158,7 +161,7 @@ def bench(model: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float 
 
 
 @app.local_entrypoint()
-def main(model: str, tag: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.85,
+def main(model: str, tag: str, racer: str = "C1v3", max_len: int = 6144, mem_util: float = 0.90,
          concurrency: int = 60):
     out = bench.remote(model, racer, max_len, mem_util, concurrency)
     raw = ROOT / f"results/raw/vllm-{tag}-fresh.jsonl"
