@@ -137,30 +137,46 @@ I was worried about this, so I timed each part of a single search on a 4-core CP
 
 The database is cheap. 64,000 passages is small, nobody writes to it, and it runs inside the same machine. The reranker is the heavy part, so I moved it to the GPU, where it takes a fraction of a second. After that, across the whole pipeline, the language model is 85% or more of the time. **The cost is the model, not the database.**
 
-## Six ways to run the same questions
+## Same question, six ways to answer it
 
-I set up a "race" between different ways of using the models, all on the same questions, documents and search:
+Once search is in place, the real design question is: **who decides what to search next, the model or my code?**
 
-| Racer | Who controls the process |
-| --- | --- |
-| Closed book | No search. Memory check only |
-| A, basic RAG | Search once, answer |
-| B, big agent | gpt-oss-120b runs its own search loop |
-| C1, fixed steps | Code runs the steps; the model fills small JSON forms |
-| C2, guarded agent | The model picks searches; code enforces rules |
-| D, free small agent | The small model runs its own loop, like B |
+To find out, I ran the same 200 questions through six different setups. Same documents, same search, same questions. Only the way of working changed. Here's what each one does with the Hong Kong question from earlier.
 
-First results with the smallest Gemma (E2B, about 2B), on 200 questions:
+**1. No search (memory only).** The model just answers from what it already knows. This is only a check that the answers aren't in its memory. It would guess a year.
 
-| Racer | Right |
+**2. Search once, then answer.** Code searches with the whole question, shows the model the top 5 passages, and the model answers. Simple and cheap. Here the search would most likely find the Hit and Miss Tour article but nothing about Hong Kong's history, because the question never says "Hong Kong". So it can't answer.
+
+**3. Big model runs its own loop (gpt-oss-120b).** The model gets a search tool and decides everything itself, in a loop: what to search, when to search again, when to stop. A good big model searches the show, reads "Hong Kong", searches Hong Kong's history, and answers.
+
+**4. Small model runs its own loop.** Exactly the same as setup 3, but with the small Gemma doing the deciding. No help, no rules.
+
+**5. Small model runs its own loop, with code checking it.** The model still decides what to search, but code blocks bad moves: it rejects an answer that isn't in any passage, blocks a repeated search, stops it from answering too early.
+
+**6. Code runs the steps, the model only reads.** The model writes a plan once ("first find the place, then find when it became a colony"). After that, *code* runs each step in order: search, show the model 5 passages, take its answer, plug it into the next step. The model never decides when to search or when to stop. It only answers small reading questions in a fixed JSON format.
+
+| | Who decides what to search next | Who decides when to stop |
+| --- | --- | --- |
+| 1. No search | nobody | — |
+| 2. Search once | code (once) | code |
+| 3. Big model, own loop | the model | the model |
+| 4. Small model, own loop | the model | the model |
+| 5. Small model, own loop + checks | the model, within code's rules | the model, within code's rules |
+| 6. Code runs the steps | code, following the model's plan | code |
+
+Results with the smallest Gemma (E2B, about 2B per word), on the 200 questions:
+
+| Setup | Right |
 | --- | ---: |
-| Closed book | 2.5% |
-| D, free small agent | 20.0% |
-| A, search once | 32.5% |
-| C2, guarded agent | 45.0% |
-| **C1, fixed steps** | **62.5%** |
+| 1. No search | 2.5% |
+| 4. Small model, own loop | 20.0% |
+| 2. Search once, then answer | 32.5% |
+| 5. Small model, own loop + checks | 45.0% |
+| **6. Code runs the steps** | **62.5%** |
 
-The free small agent was the worst of the lot. It stopped early, repeated searches, and picked weak tools. The version where code runs the steps was three times better.
+Letting the small model run its own loop was the worst of the lot, worse even than searching once. Reading its traces, it stopped early, searched the same thing twice, and picked the weakest search tool. Adding checks helped (45%), but the checks can only block bad moves; they can't teach the model the basic routine of "find the name, then search for that name". Taking the decisions away from the model entirely was three times better than letting it run free.
+
+Setup 3, the big model, comes into the picture later, in the section on testing it fairly.
 
 :::callout{tone="result"}
 For small models, code should run the process. Letting a 2B model run its own loop gave 20%. Code running the same model through fixed steps gave 62.5%.
@@ -256,10 +272,10 @@ Any check that waits for a small model to admit a mistake will rarely fire. Chec
 
 Then I swapped in Gemma 4 E4B (about 4B per word) with the exact same code:
 
-| Code | 2B | 4B |
+| Setup | 2B | 4B |
 | --- | ---: | ---: |
-| Code runs the steps | 64.5% | **72.0%** |
-| Model runs the loop (with checks) | 47.0% | 65.5% |
+| 6. Code runs the steps | 64.5% | **72.0%** |
+| 5. Small model runs its own loop + checks | 47.0% | 65.5% |
 
 The rules were designed by looking at the 2B's mistakes, and they still helped the 4B. Looking at why:
 
@@ -271,7 +287,7 @@ The rules were designed by looking at the 2B's mistakes, and they still helped t
 
 The 4B plans proper chains, and it admits "unknown", which triggers the wider search, which finds more pages.
 
-Also notice the gap between "code runs the steps" and "model runs the loop". It's 17.5 points at 2B and 6.5 at 4B. Later, with a 26B model, it was zero. **Agent loops need model intelligence.** The smarter the model, the less the code matters.
+Also notice the gap between setup 6 (code runs the steps) and setup 5 (the model runs its own loop). It's 17.5 points at 2B and 6.5 at 4B. Later, with a 26B model, it was zero. **Agent loops need model intelligence.** The smarter the model, the less the code matters.
 
 ## Was I fooling myself?
 
@@ -327,7 +343,7 @@ vLLM is a server that batches many users' requests together on one GPU. I rented
 | E4B, 4-bit | Step-by-step | 41 | most |
 | E4B, full precision | Step-by-step | 43 | about half |
 | 26B-A4B (MoE), 4-bit | Step-by-step | 47 | barely fits |
-| 26B-A4B (MoE), 4-bit | Its own loop | 47 | barely fits |
+| 26B-A4B (MoE), 4-bit | Runs its own loop + checks | 47 | barely fits |
 
 Two things here. Compressing E4B to 4-bit cost about 2 questions and doubled the room for users. And the 26B MoE was the most accurate, at the same speed as E4B (same ~4B working size), but it hardly fits on a 24 GB card. For real traffic it needs a bigger GPU.
 
@@ -350,9 +366,9 @@ Worse and 3× slower. "Unknown" answers went from 12 to 42: reasoning at length,
 
 ### More rules
 
-After reading more failure traces, I wrote four more fixes (v6). One of them was "if the answer looks like a description, ask for the name instead". My test for "looks like a description" was too loose: 5+ words, or starts with "a" or "the". It fired on **58 of 200 questions**, 42 of which were already right, and caused 7 of the 8 new mistakes. "Kohei Fujimura" became "Fujimura".
+After reading more failure traces, I wrote four more fixes into the step-by-step code. One of them was "if the answer looks like a description, ask for the name instead". My test for "looks like a description" was too loose: 5+ words, or starts with "a" or "the". It fired on **58 of 200 questions**, 42 of which were already right, and caused 7 of the 8 new mistakes. "Kohei Fujimura" became "Fujimura".
 
-v6 scored 148 against 150. A stricter v6b scored 149. No real gain.
+With the four fixes it scored 148, against 150 without them. I made that one check stricter (only answers starting with "a" or "an") and got 149. No real gain either way, so I dropped the fixes.
 
 :::callout{tone="warn"}
 A check that fires on 30% of questions to fix a problem seen in 2% does more harm than good. Log every time a rule fires, and judge it by what it breaks as well as what it fixes.
@@ -432,16 +448,18 @@ I tried "quick path first, full chain only if it's unsure". It didn't work. The 
 What did work: let the **planner** decide. It already writes the steps, so if the plan has one step, take the quick path:
 
 ```python
-class RacerR(RacerC1v5):
-    def solve(self, question, run=None, plan=None):
+# The router, slightly simplified from the repo (class RacerR in rag/racers.py)
+class Router(StepByStep):
+    def solve(self, question):
         run = Run()
-        plan = self.ask_json(run, self.PLAN.replace("{q}", question), max_new_tokens=200)
-        steps = [s for s in plan.get("steps", []) if isinstance(s, str) and s.strip()]
-        if len(steps) <= 1:                      # one lookup: quick path
-            ans, _, _ = self._step4(run, 0, question, question, [], [])
-            run.answer = ans
-            return self._shape_fix(run, question)
-        return super().solve(question, run=run, plan=plan)   # full chain, same plan
+        plan = self.ask_json(run, PLAN_PROMPT.replace("{q}", question))
+        steps = [s for s in plan.get("steps", []) if s.strip()]
+        if len(steps) <= 1:
+            # one lookup: search with the user's own question, read, answer
+            answer = self.lookup(run, question)
+            return self.finish(run, question, answer)
+        # more than one lookup: the full step-by-step chain, reusing the same plan
+        return super().solve(question, run=run, plan=plan)
 ```
 
 It sent 85 of the 100 easy questions down the quick path and only 4 of the 247 hard ones.
