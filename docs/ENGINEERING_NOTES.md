@@ -85,6 +85,22 @@ Since search is cheap and the model is expensive, every search should run **all 
   - Vectors find paraphrases that keywords miss.
   - The reranker reads the merged candidates and keeps the truly relevant ones.
 
+**Measured on the 347-question exam** (searching with the question itself; "found" = the needed article is among the
+5 passages the model reads; hard = the first article a chain must find; reranker row on all 100 easy + 126 hard):
+
+| Search | Easy (100) | Hard, first article (233) |
+|---|---|---|
+| Keyword only (BM25) | 100% | 94% |
+| Meaning only (vector) | 100% | 97% |
+| Exact-name only | 85% | 85% |
+| Keyword + meaning | 100% | 97% |
+| Keyword + meaning + exact, merged | 100% | 98% |
+| All three + reranker | 100% | 99% |
+
+Combining methods adds a few points of *article* recall on hard questions (94% -> 98-99%); on direct questions any
+method finds the article. The big gain is the reranker choosing the right *passage* inside the article: without it,
+accuracy fell from 150 to 117 of 200 (Section 14) even though the article was usually found.
+
 **Recommendation for a real app:** expose **one search call** that always runs keyword + phrase + vector, fused with RRF, then reranked. Let the model (or the code) decide only *what to search for*, never *how*. One database that serves all three kinds of query in one request, as LanceDB does here, makes this simple.
 
 ---
