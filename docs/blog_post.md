@@ -6,7 +6,7 @@ The small model is Gemma 4 E4B. It does roughly the work of a 4 billion paramete
 
 Let me give you the result first. The rest of the post is how I got there and what I learned on the way.
 
-| On a locked test of 347 questions | Result |
+| On a final test of 347 new questions, not used while building | Result |
 | --- | ---: |
 | Direct, one-lookup questions ("How many elevators are in JR Gate Tower?") | 86% right |
 | Multi-step questions (find one thing, then use it to find another) | 68% right |
@@ -14,7 +14,7 @@ Let me give you the result first. The rest of the post is how I got there and wh
 | Wait time for one user, easy / hard question | 1.8 s / 4.4 s |
 | Cost per 1,000 answers on one rented A10 GPU | about $0.66 |
 
-On a smaller locked test of multi-step questions, the small model with my code matched the 120B model running its own search loop (I'll explain the honest version of that claim later). The model's weights were never changed. No training, no fine-tuning. Everything came from the code around it.
+On a separate set of 60 new multi-step questions, which I hadn't used while building anything, the small model with my code matched the 120B model running its own search loop (I'll explain the honest version of that claim later). The model's weights were never changed. No training, no fine-tuning. Everything came from the code around it.
 
 I'll go through it from scratch, so you can follow even if you've never built one of these.
 
@@ -277,7 +277,15 @@ Also notice the gap between "code runs the steps" and "model runs the loop". It'
 
 There's an obvious problem here. I improved the pipeline by looking at mistakes on 200 questions, and then scored it on the same 200 questions. That's like studying the exam paper and then taking the same exam.
 
-So I made 60 fresh questions, using only articles that no earlier question had touched. I committed the file to git before running anything on it, and ran every setup once with no changes.
+So I made 60 new questions, using only articles that no earlier question had touched, and followed three rules:
+
+:::steps
+1. Save the questions in git **before** running anything on them. Git records the date and the exact content, so I can't quietly change a question after seeing how the model did.
+2. Never use them while improving the pipeline. No reading their mistakes, no fixing rules for them.
+3. Run every setup on them once, unchanged, and report whatever comes out.
+:::
+
+It's the same as sealing an exam paper before the students start studying. If the students then do well, it's because they learned the subject, not because they saw the paper. People call this a held-out test set.
 
 | Setup | Practice set | Fresh set |
 | --- | ---: | ---: |
@@ -404,7 +412,7 @@ Every setup gained 6 to 11 questions out of 200, and no setup changed rank. The 
 
 ## A realistic test, and a router
 
-All my questions so far needed 2–3 lookups. Real users mostly ask direct things like "what's the refund policy?". So I built a bigger locked test of **347 questions**, including **100 easy one-lookup questions**, on articles nothing else had used. Same recipe, committed to git before any run.
+All my questions so far needed 2–3 lookups. Real users mostly ask direct things like "what's the refund policy?". So I built a bigger test of **347 new questions**, including **100 easy one-lookup questions**, on articles nothing else had used. Same three rules as before: saved in git before any run, never used for improving the pipeline, run once.
 
 Then I compared two paths:
 
@@ -481,7 +489,7 @@ So one A10 gives about **50 answers a minute, at about $0.66 per 1,000 answers**
 - Send easy questions down a cheap path. The planner can be the router.
 
 **Testing**
-- Lock a fresh test before running anything on it.
+- Keep a set of test questions you never use while building. Save it before running anything on it, and run it only to check, never to tune.
 - 60 questions swing by ±12 points. Count fixes against breaks, and use bigger sets.
 - Check the grader.
 - Test on questions that look like real use.
