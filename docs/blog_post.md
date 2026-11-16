@@ -41,7 +41,7 @@ In what year range?
 
 You can't search for the answer directly. First you have to find out where the show went (Hong Kong). Only then can you search for when Hong Kong became a British colony (1841–1842).
 
-The popular way to handle this is "agentic RAG". You give the model a search tool and let it run in a loop: search, read, decide what to search next, and stop when it thinks it's done. Big models are good at this. Small models, as I found out, are not.
+The popular way to handle this is "agentic RAG", usually built on the ReAct pattern. You give the model a search tool and let it run in a loop: search, read, decide what to search next, and stop when it thinks it's done. Big models are good at this. Small models, as I found out, are not.
 
 So my hypothesis was simple:
 
@@ -120,22 +120,9 @@ But here's the thing that surprised me. Finding the right *article* was almost n
 
 So: a reranker is essential, bigger ones weren't better here, and showing the model more passages doesn't make up for it.
 
-### Should the model choose which search to use?
+Two more things about search. I didn't let the model choose which kind of search to run: when I tried, it mostly picked keyword search, the weakest one (40% eventual accuracy against 49% starting with the combined search). Search is cheap, so run all of it every time and let the model decide only *what* to search for.
 
-No. In one setup I let the small model pick a search tool each turn. It picked keyword search most often (176 times), which was the weakest starting tool: 40% eventual accuracy against 49% when it started with the combined search. Search is cheap, so just run all of it every time. Let the model decide *what* to search for, never *how*.
-
-### Is all this searching heavy on the database?
-
-I was worried about this, so I timed each part of a single search on a 4-core CPU:
-
-| Part | Time | Share |
-| --- | ---: | ---: |
-| Turn the question into a vector | 112 ms | 2% |
-| Database: keyword + meaning search | 102 ms | 2% |
-| Database: exact-name search | 5 ms | 0% |
-| Reranker scoring 30 passages | 4,414 ms | 95% |
-
-The database is cheap. 64,000 passages is small, nobody writes to it, and it runs inside the same machine. The reranker is the heavy part, so I moved it to the GPU, where it takes a fraction of a second. After that, across the whole pipeline, the language model is 85% or more of the time. **The cost is the model, not the database.**
+And running three searches doesn't load the database. I timed it: the database part takes about 0.1 seconds, because 64,000 passages is small and nobody writes to it. The reranker is 95% of search time, so I run it on the GPU. Across the whole pipeline, the language model takes 85% or more of the time. **The cost is the model, not the database.**
 
 ## Same question, six ways to answer it
 
@@ -155,15 +142,6 @@ To find out, I ran the same 200 questions through six different setups. Same doc
 
 **6. Code runs the steps, the model only reads.** The model writes a plan once ("first find the place, then find when it became a colony"). After that, *code* runs each step in order: search, show the model 5 passages, take its answer, plug it into the next step. The model never decides when to search or when to stop. It only answers small reading questions in a fixed JSON format.
 
-| | Who decides what to search next | Who decides when to stop |
-| --- | --- | --- |
-| 1. No search | nobody | — |
-| 2. Search once | code (once) | code |
-| 3. Big model, own loop | the model | the model |
-| 4. Small model, own loop | the model | the model |
-| 5. Small model, own loop + checks | the model, within code's rules | the model, within code's rules |
-| 6. Code runs the steps | code, following the model's plan | code |
-
 Results with the smallest Gemma (E2B, about 2B per word), on the 200 questions:
 
 | Setup | Right |
@@ -178,15 +156,11 @@ Letting the small model run its own loop was the worst of the lot, worse even th
 
 Setup 3, the big model, comes into the picture later, in the section on testing it fairly.
 
-:::callout{tone="result"}
-For small models, code should run the process. Letting a 2B model run its own loop gave 20%. Code running the same model through fixed steps gave 62.5%.
-:::
-
 ## The step-by-step pipeline, piece by piece
 
 Here's what the winning setup does for the Hong Kong question.
 
-**Step 1, the plan.** The model reads the question and writes the lookup steps as JSON. If a step needs an earlier answer, it writes `#1`:
+**Step 1, the plan.** The model reads the question and writes the lookup steps as JSON (splitting a question into smaller sub-questions is an old trick; see Press et al. in the references). If a step needs an earlier answer, it writes `#1`:
 
 ```json
 {
@@ -243,6 +217,8 @@ I improved the pipeline in a loop, using Claude (through Claude Code) as the eng
 3. Write a general fix. No rules about specific questions or answers.
 4. Run again, check per question type, keep it or drop it.
 :::
+
+This idea, a strong model improving a weaker model's prompts and pipeline instead of its weights, has been studied before: DSPy, OPRO, APE and ADAS in the references are all versions of it.
 
 Some of the mistakes and the rules they turned into:
 
@@ -489,35 +465,18 @@ So one A10 gives about **50 answers a minute, at about $0.66 per 1,000 answers**
 
 ## What I'd tell someone building this
 
-**Search**
-- Run keyword, meaning and exact-name search together on every query, merge with RRF, then rerank. Don't let the model pick.
-- The reranker matters most (+16 points). A bigger reranker wasn't better.
-- The database isn't the bottleneck. The model is.
-
-**Small models**
-- Let code run the process. The model should only do small reading jobs with a fixed JSON reply.
-- Make the model quote its source, and check the quote in code.
-- Don't wait for a small model to say it's unsure. It won't.
-- Thinking mode and more prompt rules can make things worse. Count what each rule breaks.
-
-**Serving**
-- Know both sizes of a model: stored (memory) and working (speed).
-- 4-bit compression was almost free. Batching (vLLM) changed the cost by more than 10×.
-- Measure throughput and waiting time under load, not just how many requests fit in memory.
-- Send easy questions down a cheap path. The planner can be the router.
-
-**Testing**
-- Keep a set of test questions you never use while building. Save it before running anything on it, and run it only to check, never to tune.
-- 60 questions swing by ±12 points. Count fixes against breaks, and use bigger sets.
-- Check the grader.
-- Test on questions that look like real use.
+- **Let code run the process.** The small model should only do small reading jobs with a fixed JSON reply, and quote where its answer came from so code can check it.
+- **Run every kind of search together, then rerank.** The reranker was worth 16 points.
+- **Don't wait for a small model to say it's unsure.** It won't. Checks have to come from code.
+- **Count what every new rule breaks**, not just what it fixes. Thinking mode and extra rules both made things worse here.
+- **Send easy questions down a cheap path.** The planner can be the router.
+- **Measure waiting time under load**, not how many requests fit in memory.
+- **Keep a test you never build on, and check your grader.**
 
 ## Limits
 
-- **One kind of document** (Wikipedia) and machine-written questions. Real company documents and real users would look different. The exact scores won't transfer; the lessons probably will.
+- **One kind of document** (Wikipedia) and AI-written questions, some oddly worded. Real company documents and real users would look different. The exact scores won't transfer; the lessons probably will.
 - **The 120B agent was never tuned**, while my pipeline got many rounds. With the same effort it would likely improve.
-- **The test questions were written by AI**, and some are oddly worded or ambiguous.
-- **On the final test, some articles start up to 3 questions**, because I was running out of unused articles. Those questions are a bit related.
 - **Multi-step questions are still the weak spot** at 68%. The 26B model does about 10–14 points better there, if you can afford the bigger GPU.
 
 ## What's next
